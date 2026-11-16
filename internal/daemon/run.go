@@ -68,6 +68,7 @@ func Run(dir string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	api := &API{Dir: dir, Config: c, Nodes: nodes, Stop: cancel}
+	defer api.closeForwards()
 	proxy := &router.Proxy{Routes: api.Routes, DialAccount: api.Dial}
 	ps := &http.Server{Handler: proxy, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 1 << 20}
 	ms := &http.Server{Handler: api, ReadHeaderTimeout: 5 * time.Second}
@@ -87,6 +88,7 @@ func Run(dir string) error {
 		}
 		api.mu.Unlock()
 	}
+	api.restoreForwards()
 	select {
 	case <-ctx.Done():
 	case e = <-errs:

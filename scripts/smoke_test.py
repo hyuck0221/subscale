@@ -69,6 +69,19 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
         assert b"db.invalid" in run("work", "list").stdout
         assert run("home", "add", "db.invalid", check=False).returncode != 0
         assert b"502" == run("exec", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://db.invalid").stdout
+        # A saved forward uses its named account even if the target is reachable
+        # directly. A logged-out account must not fall back to the OS network.
+        forward_target = f"127.0.0.1:{server.server_port}"
+        run("work", "forward", "add", forward_target)
+        saved = json.loads(Path(directory, "config.json").read_text())
+        forward_port = saved["forwards"][0]["local_port"]
+        assert saved["forwards"][0]["target"] == forward_target
+        assert b"logged out" in run("work", "forward", "list").stdout
+        with socket.create_connection(("127.0.0.1", forward_port), timeout=3) as client:
+            try:
+                assert client.recv(1) == b""
+            except ConnectionResetError:
+                pass
         # Legacy on-disk identities survive rename and a daemon restart.
         credentials = Path(directory, "accounts", "work", "credential-fixture")
         credentials.parent.mkdir(parents=True)
@@ -77,6 +90,7 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
         saved = json.loads(Path(directory, "config.json").read_text())
         assert saved["accounts"]["office"]["state_dir"] == "work"
         assert saved["routes"][0]["account"] == "office"
+        assert saved["forwards"][0]["account"] == "office"
         assert b"keep-this-identity" == credentials.read_bytes()
         assert run("office", "rename", "home", check=False).returncode != 0
         assert run("office", "rename", "status", check=False).returncode != 0
@@ -87,6 +101,9 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
             time.sleep(0.1)
         assert b"office" in run("status").stdout
         assert b"db.invalid" in run("office", "list").stdout
+        assert f"127.0.0.1:{forward_port}".encode() in run("office", "forward", "list").stdout
+        run("office", "forward", "remove", forward_target)
+        assert b"No TCP forwards" in run("office", "forward", "list").stdout
         run("office", "remove", "db.invalid")
         url = f"http://127.0.0.1:{server.server_port}/"
         assert run("exec", "curl", "-fsS", url).stdout == b"subscale direct path works"
@@ -103,7 +120,7 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
                 break
             time.sleep(0.1)
         assert not Path(directory, "daemon.sock").exists()
-        print("PASS: concurrent startup, authenticated list, rename persistence, reserved names, account conflicts, fail-closed routing, HTTP, TCP CONNECT, PAC, shutdown")
+        print("PASS: concurrent startup, authenticated list, rename persistence, saved TCP forwards, reserved names, account conflicts, fail-closed routing, HTTP, TCP CONNECT, PAC, shutdown")
     finally:
         try:
             run("stop", check=False)

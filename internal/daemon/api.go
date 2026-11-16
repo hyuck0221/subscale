@@ -27,24 +27,28 @@ type Nodes interface {
 	Close()
 }
 type Request struct {
-	Op      string `json:"op"`
-	Name    string `json:"name,omitempty"`
-	NewName string `json:"new_name,omitempty"`
-	Host    string `json:"host,omitempty"`
-	Target  string `json:"target,omitempty"`
+	Op        string `json:"op"`
+	Name      string `json:"name,omitempty"`
+	NewName   string `json:"new_name,omitempty"`
+	Host      string `json:"host,omitempty"`
+	Target    string `json:"target,omitempty"`
+	LocalPort int    `json:"local_port,omitempty"`
 }
 type Response struct {
-	Config config.Config             `json:"config"`
-	Status map[string]tailnet.Status `json:"status,omitempty"`
-	Error  string                    `json:"error,omitempty"`
-	Proxy  string                    `json:"proxy"`
+	Config        config.Config             `json:"config"`
+	Status        map[string]tailnet.Status `json:"status,omitempty"`
+	Error         string                    `json:"error,omitempty"`
+	Proxy         string                    `json:"proxy"`
+	ForwardStatus map[int]string            `json:"forward_status,omitempty"`
 }
 type API struct {
-	mu     sync.Mutex
-	Dir    string
-	Config config.Config
-	Nodes  Nodes
-	Stop   func()
+	mu            sync.Mutex
+	Dir           string
+	Config        config.Config
+	Nodes         Nodes
+	Stop          func()
+	forwards      map[int]*tcpForward
+	forwardErrors map[int]string
 }
 
 func (a *API) Routes() []config.Route {
@@ -84,7 +88,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(Response{Error: e.Error()})
 		return
 	}
-	out := Response{Config: a.Config, Proxy: config.ProxyAddress, Status: map[string]tailnet.Status{}}
+	out := Response{Config: a.Config, Proxy: config.ProxyAddress, Status: map[string]tailnet.Status{}, ForwardStatus: a.forwardStatus()}
 	a.mu.Unlock()
 	if q.Op == "status" || q.Op == "login" || q.Op == "list" {
 		for n := range out.Config.Accounts {
@@ -105,7 +109,7 @@ func (a *API) apply(ctx context.Context, q Request) error {
 	switch q.Op {
 	case "ping", "stop":
 		return nil
-	case "status", "list":
+	case "status", "list", "forward-list":
 		if q.Name != "" {
 			if _, ok := a.Config.Accounts[q.Name]; !ok {
 				return fmt.Errorf("unknown account %q", q.Name)
@@ -117,13 +121,16 @@ func (a *API) apply(ctx context.Context, q Request) error {
 		return e
 	}
 	// Clone before editing, so a failed save cannot change live routing.
-	c := config.Config{Accounts: map[string]config.Account{}, Routes: append([]config.Route(nil), a.Config.Routes...)}
+	c := config.Config{Accounts: map[string]config.Account{}, Routes: append([]config.Route(nil), a.Config.Routes...), Forwards: append([]config.Forward(nil), a.Config.Forwards...)}
 	for n, v := range a.Config.Accounts {
 		c.Accounts[n] = v
 	}
 	_, exists := c.Accounts[q.Name]
 	if q.Op != "login" && !exists {
 		return fmt.Errorf("unknown account %q; run subscale %s login", q.Name, q.Name)
+	}
+	if q.Op == "forward-add" || q.Op == "forward-remove" {
+		return a.applyForward(q, c)
 	}
 	switch q.Op {
 	case "login":
@@ -171,6 +178,11 @@ func (a *API) apply(ctx context.Context, q Request) error {
 		for i := range c.Routes {
 			if c.Routes[i].Account == q.Name {
 				c.Routes[i].Account = q.NewName
+			}
+		}
+		for i := range c.Forwards {
+			if c.Forwards[i].Account == q.Name {
+				c.Forwards[i].Account = q.NewName
 			}
 		}
 		if e := a.Nodes.Rename(q.Name, q.NewName); e != nil {

@@ -15,7 +15,7 @@ import (
 func TestReservedNamesRejectedBeforeStartingDaemon(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SUBSCALE_HOME", dir)
-	for _, name := range []string{"help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "service", "update", "upgrade", "login", "logout", "add", "remove", "rm", "rename", "install", "uninstall", "on", "off", "pac", "STATUS"} {
+	for _, name := range []string{"help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "forward", "service", "update", "upgrade", "login", "logout", "add", "remove", "rm", "rename", "install", "uninstall", "on", "off", "pac", "STATUS"} {
 		e := Run([]string{name, "login"}, "dev")
 		if e == nil || !strings.Contains(e.Error(), "reserved account name") {
 			t.Errorf("%s login: %v", name, e)

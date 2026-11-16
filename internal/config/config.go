@@ -37,6 +37,7 @@ type Route struct {
 type Config struct {
 	Accounts map[string]Account `json:"accounts"`
 	Routes   []Route            `json:"routes"`
+	Forwards []Forward          `json:"forwards,omitempty"`
 }
 
 func Dir() (string, error) {
@@ -95,6 +96,19 @@ func Load(dir string) (Config, error) {
 			}
 		}
 	}
+	ports := map[int]bool{}
+	targets := map[string]bool{}
+	for _, f := range c.Forwards {
+		if _, ok := c.Accounts[f.Account]; !ok {
+			return c, fmt.Errorf("unknown forward account %q", f.Account)
+		}
+		target, err := Endpoint(f.Target)
+		key := f.Account + "/" + f.Target
+		if err != nil || target != f.Target || f.LocalPort < 1 || f.LocalPort > 65535 || f.LocalPort == 18765 || ports[f.LocalPort] || targets[key] {
+			return c, fmt.Errorf("invalid or duplicate forward %+v", f)
+		}
+		ports[f.LocalPort], targets[key] = true, true
+	}
 	return c, nil
 }
 func Save(dir string, c Config) error {
@@ -131,7 +145,7 @@ func Name(s string) error {
 		return fmt.Errorf("account name must be 1-32 ASCII letters, digits, _ or -, starting with a letter or digit")
 	}
 	switch strings.ToLower(s) {
-	case "help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "service", "update", "upgrade", "login", "logout", "add", "remove", "rm", "rename", "install", "uninstall", "on", "off", "pac":
+	case "help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "forward", "service", "update", "upgrade", "login", "logout", "add", "remove", "rm", "rename", "install", "uninstall", "on", "off", "pac":
 		return fmt.Errorf("reserved account name %q", s)
 	}
 	return nil

@@ -36,6 +36,11 @@ func printStatus(out daemon.Response, only string) {
 				fmt.Println()
 			}
 		}
+		for _, f := range out.Config.Forwards {
+			if f.Account == n {
+				fmt.Printf("  forward %s → %s (%s)\n", f.LocalAddress(), f.Target, out.ForwardStatus[f.LocalPort])
+			}
+		}
 	}
 	fmt.Printf("Proxy: http://%s\nPAC: http://%s/proxy.pac\n", out.Proxy, out.Proxy)
 }

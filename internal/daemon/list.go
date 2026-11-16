@@ -23,5 +23,11 @@ func authenticatedAccounts(out Response) Response {
 			filtered.Config.Routes = append(filtered.Config.Routes, route)
 		}
 	}
+	for _, f := range out.Config.Forwards {
+		if _, ok := filtered.Config.Accounts[f.Account]; ok {
+			filtered.Config.Forwards = append(filtered.Config.Forwards, f)
+		}
+	}
+	filtered.ForwardStatus = out.ForwardStatus
 	return filtered
 }

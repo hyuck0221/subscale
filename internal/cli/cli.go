@@ -29,6 +29,11 @@ const help = `subscale — named secondary Tailscale connections
   subscale NAME remove HOST           Remove a routing rule (alias: rm)
   subscale NAME list                  Show this account and its rules
   subscale NAME rename NEW_NAME       Rename an account, keeping login and rules
+  subscale NAME forward add HOST:PORT [--local PORT]
+                                      Save a TCP forward (automatic local port)
+  subscale NAME forward list          Show saved forwards and local addresses
+  subscale NAME forward remove HOST:PORT
+                                      Remove a forward and close its connections
   subscale list                       List authenticated accounts
   subscale update | upgrade           Install the latest GitHub release
   subscale status                     Show all accounts and routing rules
@@ -49,7 +54,8 @@ Examples:
   subscale exec curl https://grafana.example.ts.net
   ssh -o 'ProxyCommand=subscale connect %h %p' user@server
 
-Only proxy-aware traffic is routed. Unmatched hosts use the existing OS connection.
+Proxy-aware traffic and registered local TCP forwards are routed.
+Unmatched proxy hosts use the existing OS connection.
 State: SUBSCALE_HOME or the OS user config directory / subscale.
 `
 
@@ -123,11 +129,16 @@ func Run(args []string, version string) error {
 			return e
 		}
 		if len(args) < 2 {
-			return errors.New("expected NAME login|logout|add|remove|list|rename")
+			return errors.New("expected NAME login|logout|add|remove|list|rename|forward")
 		}
 		q.Name = args[0]
 		q.Op = args[1]
 		switch q.Op {
+		case "forward":
+			q, e = parseForward(args)
+			if e != nil {
+				return e
+			}
 		case "login", "logout", "list", "status":
 			if len(args) != 2 {
 				return errors.New("unexpected arguments")
@@ -185,7 +196,11 @@ func Run(args []string, version string) error {
 	if q.Op == "login" {
 		return waitLogin(dir, q.Name)
 	}
-	if q.Op == "list" {
+	if q.Op == "forward-add" || q.Op == "forward-list" {
+		writeForwards(os.Stdout, out, q.Name, q.Target)
+	} else if q.Op == "forward-remove" {
+		fmt.Printf("%s: removed forward %s\n", q.Name, q.Target)
+	} else if q.Op == "list" {
 		writeList(os.Stdout, out)
 	} else if q.Op == "rename" {
 		fmt.Printf("%s renamed to %s\n", q.Name, q.NewName)
