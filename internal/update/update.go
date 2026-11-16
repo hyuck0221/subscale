@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,29 +17,22 @@ import (
 	"time"
 )
 
-const latestURL = "https://api.github.com/repos/hyuck0221/subscale/releases/latest"
+const latestURL = "https://github.com/hyuck0221/subscale/releases/latest"
 const maxArchive = 100 << 20
 
 type Updater struct {
-	Client *http.Client
-	APIURL string
-	OS     string
-	Arch   string
+	Client    *http.Client
+	LatestURL string
+	OS        string
+	Arch      string
 }
 type Result struct {
 	Version string
 	Changed bool
 }
-type release struct {
-	Tag    string `json:"tag_name"`
-	Assets []struct {
-		Name string `json:"name"`
-		URL  string `json:"browser_download_url"`
-	} `json:"assets"`
-}
 
 func Default() Updater {
-	return Updater{Client: &http.Client{Timeout: 2 * time.Minute}, APIURL: latestURL, OS: runtime.GOOS, Arch: runtime.GOARCH}
+	return Updater{Client: &http.Client{Timeout: 2 * time.Minute}, LatestURL: latestURL, OS: runtime.GOOS, Arch: runtime.GOARCH}
 }
 func (u Updater) get(ctx context.Context, url string) (*http.Response, error) {
 	req, e := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -49,8 +41,8 @@ func (u Updater) get(ctx context.Context, url string) (*http.Response, error) {
 	}
 	req.Header.Set("User-Agent", "subscale-updater")
 	req.Header.Set("Accept", "application/octet-stream")
-	if url == u.APIURL {
-		req.Header.Set("Accept", "application/vnd.github+json")
+	if url == u.LatestURL {
+		req.Header.Set("Accept", "text/html")
 	}
 	res, e := u.Client.Do(req)
 	if e != nil {
@@ -61,7 +53,7 @@ func (u Updater) get(ctx context.Context, url string) (*http.Response, error) {
 		if res.StatusCode == 404 {
 			return nil, fmt.Errorf("no published release or download found at %s", url)
 		}
-		return nil, fmt.Errorf("download returned HTTP %d", res.StatusCode)
+		return nil, fmt.Errorf("download returned HTTP %d at %s", res.StatusCode, url)
 	}
 	return res, nil
 }
@@ -70,37 +62,16 @@ func (u Updater) Apply(ctx context.Context, executable, current string) (Result,
 	if (u.OS != "darwin" && u.OS != "linux") || (u.Arch != "amd64" && u.Arch != "arm64") {
 		return result, fmt.Errorf("unsupported platform %s/%s", u.OS, u.Arch)
 	}
-	res, e := u.get(ctx, u.APIURL)
+	asset := "subscale_" + u.OS + "_" + u.Arch + ".tar.gz"
+	version, archiveURL, checksumURL, e := u.releaseURLs(ctx, asset)
 	if e != nil {
 		return result, e
 	}
-	var rel release
-	e = json.NewDecoder(io.LimitReader(res.Body, 2<<20)).Decode(&rel)
-	res.Body.Close()
-	if e != nil {
-		return result, e
-	}
-	if rel.Tag == "" || !strings.HasPrefix(rel.Tag, "v") {
-		return result, fmt.Errorf("invalid release version %q", rel.Tag)
-	}
-	result.Version = rel.Tag
-	if current == rel.Tag {
+	result.Version = version
+	if current == version {
 		return result, nil
 	}
-	asset := "subscale_" + u.OS + "_" + u.Arch + ".tar.gz"
-	var archiveURL, checksumURL string
-	for _, a := range rel.Assets {
-		switch a.Name {
-		case asset:
-			archiveURL = a.URL
-		case "checksums.txt":
-			checksumURL = a.URL
-		}
-	}
-	if archiveURL == "" || checksumURL == "" {
-		return result, fmt.Errorf("release %s is missing %s or checksums.txt", rel.Tag, asset)
-	}
-	res, e = u.get(ctx, checksumURL)
+	res, e := u.get(ctx, checksumURL)
 	if e != nil {
 		return result, e
 	}
@@ -170,8 +141,8 @@ func (u Updater) Apply(ctx context.Context, executable, current string) (Result,
 	if e != nil {
 		return result, fmt.Errorf("downloaded executable cannot run: %w", e)
 	}
-	if strings.TrimSpace(string(output)) != "subscale "+rel.Tag {
-		return result, fmt.Errorf("downloaded executable version does not match release %s", rel.Tag)
+	if strings.TrimSpace(string(output)) != "subscale "+version {
+		return result, fmt.Errorf("downloaded executable version does not match release %s", version)
 	}
 	if e = os.Rename(candidate.Name(), executable); e != nil {
 		return result, e

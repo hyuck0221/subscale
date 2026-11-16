@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -73,24 +72,26 @@ func TestApply(t *testing.T) {
 			var server *httptest.Server
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/latest":
+				case "/releases/latest":
 					if tt.kind == "404" {
 						http.NotFound(w, r)
 						return
 					}
-					if r.Header.Get("Accept") != "application/vnd.github+json" {
-						t.Error("metadata Accept header is wrong")
+					if r.Header.Get("Accept") != "text/html" {
+						t.Error("release page Accept header is wrong")
 					}
-					assets := []map[string]string{{"name": asset, "browser_download_url": server.URL + "/archive"}, {"name": "checksums.txt", "browser_download_url": server.URL + "/checksums"}}
-					if tt.kind == "asset" {
-						assets = assets[:1]
-					}
-					json.NewEncoder(w).Encode(map[string]any{"tag_name": "v0.2.0", "assets": assets})
-				case "/checksums":
+					http.Redirect(w, r, "/releases/tag/v0.2.0", http.StatusFound)
+				case "/releases/tag/v0.2.0":
+					fmt.Fprint(w, "release page; HTML is not parsed")
+				case "/releases/download/v0.2.0/checksums.txt":
 					downloads++
 					fmt.Fprintf(w, "%s  %s\n", sum, asset)
-				case "/archive":
+				case "/releases/download/v0.2.0/" + asset:
 					downloads++
+					if tt.kind == "asset" {
+						http.NotFound(w, r)
+						return
+					}
 					if tt.kind == "download" {
 						http.Error(w, "error", 503)
 						return
@@ -116,7 +117,7 @@ func TestApply(t *testing.T) {
 			if tt.kind == "current" {
 				current = "v0.2.0"
 			}
-			u := Updater{Client: server.Client(), APIURL: server.URL + "/latest", OS: runtime.GOOS, Arch: runtime.GOARCH}
+			u := Updater{Client: server.Client(), LatestURL: server.URL + "/releases/latest", OS: runtime.GOOS, Arch: runtime.GOARCH}
 			result, e := u.Apply(context.Background(), link, current)
 			data, readErr := os.ReadFile(exe)
 			if readErr != nil {
