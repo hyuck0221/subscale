@@ -64,3 +64,26 @@ func TestNames(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestStorageValidation(t *testing.T) {
+	for _, accounts := range []map[string]Account{
+		{"work": {StateDir: "../escape"}},
+		{"work": {StateDir: "same"}, "home": {StateDir: "same"}},
+	} {
+		dir := t.TempDir()
+		if e := Save(dir, Config{Accounts: accounts}); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := Load(dir); e == nil {
+			t.Fatal("accepted unsafe or duplicate storage path")
+		}
+	}
+	account := Account{}
+	if account.Storage("work") != "work" {
+		t.Fatal("legacy storage changed")
+	}
+	account.StateDir = "identity"
+	if account.Storage("office") != "identity" {
+		t.Fatal("rename changed stable storage")
+	}
+}

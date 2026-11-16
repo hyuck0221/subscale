@@ -68,7 +68,7 @@ func Run(dir string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	api := &API{Dir: dir, Config: c, Nodes: nodes, Stop: cancel}
-	proxy := &router.Proxy{Routes: api.Routes, DialAccount: nodes.Dial}
+	proxy := &router.Proxy{Routes: api.Routes, DialAccount: api.Dial}
 	ps := &http.Server{Handler: proxy, ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 1 << 20}
 	ms := &http.Server{Handler: api, ReadHeaderTimeout: 5 * time.Second}
 	errs := make(chan error, 2)
@@ -81,7 +81,7 @@ func Run(dir string) error {
 		}
 		api.mu.Lock()
 		if api.Config.Accounts[n].Enabled {
-			if startErr := nodes.Start(n); startErr != nil {
+			if startErr := nodes.Start(n, api.Config.Accounts[n].Storage(n)); startErr != nil {
 				log.Printf("start %s: %v", n, startErr)
 			}
 		}

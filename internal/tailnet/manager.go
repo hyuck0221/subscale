@@ -25,13 +25,13 @@ type Manager struct {
 }
 
 func New(dir string) *Manager { return &Manager{dir: dir, nodes: map[string]*tsnet.Server{}} }
-func (m *Manager) Start(name string) error {
+func (m *Manager) Start(name, storage string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.nodes[name] != nil {
 		return nil
 	}
-	dir := filepath.Join(m.dir, "accounts", name)
+	dir := filepath.Join(m.dir, "accounts", storage)
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
@@ -52,8 +52,8 @@ func (m *Manager) node(name string) (*tsnet.Server, error) {
 	}
 	return s, nil
 }
-func (m *Manager) Login(ctx context.Context, name string) error {
-	if e := m.Start(name); e != nil {
+func (m *Manager) Login(ctx context.Context, name, storage string) error {
+	if e := m.Start(name, storage); e != nil {
 		return e
 	}
 	s, e := m.node(name)
@@ -72,6 +72,23 @@ func (m *Manager) Login(ctx context.Context, name string) error {
 		return nil
 	}
 	return lc.StartLoginInteractive(ctx)
+}
+
+// Rename rebinds a running node without restarting it or moving credentials.
+func (m *Manager) Rename(old, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if old == name {
+		return nil
+	}
+	if m.nodes[name] != nil {
+		return fmt.Errorf("account %q already exists", name)
+	}
+	if s := m.nodes[old]; s != nil {
+		m.nodes[name] = s
+		delete(m.nodes, old)
+	}
+	return nil
 }
 func (m *Manager) Status(ctx context.Context, name string) Status {
 	s, e := m.node(name)

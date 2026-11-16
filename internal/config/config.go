@@ -17,8 +17,18 @@ import (
 const ProxyAddress = "127.0.0.1:18765"
 
 type Account struct {
-	Enabled bool `json:"enabled"`
+	Enabled  bool   `json:"enabled"`
+	StateDir string `json:"state_dir,omitempty"`
 }
+
+// Storage remains stable when the CLI name changes. Empty supports older configs.
+func (a Account) Storage(name string) string {
+	if a.StateDir != "" {
+		return a.StateDir
+	}
+	return name
+}
+
 type Route struct {
 	Account string `json:"account"`
 	Host    string `json:"host"`
@@ -54,10 +64,16 @@ func Load(dir string) (Config, error) {
 	if c.Accounts == nil {
 		c.Accounts = map[string]Account{}
 	}
-	for n := range c.Accounts {
+	storage := map[string]bool{}
+	for n, account := range c.Accounts {
 		if e := Name(n); e != nil {
 			return c, e
 		}
+		id := account.Storage(n)
+		if !validName.MatchString(id) || storage[id] {
+			return c, fmt.Errorf("invalid or duplicate account state directory %q", id)
+		}
+		storage[id] = true
 	}
 	for i, r := range c.Routes {
 		if _, ok := c.Accounts[r.Account]; !ok {
@@ -114,8 +130,8 @@ func Name(s string) error {
 	if !validName.MatchString(s) {
 		return fmt.Errorf("account name must be 1-32 ASCII letters, digits, _ or -, starting with a letter or digit")
 	}
-	switch s {
-	case "help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "service":
+	switch strings.ToLower(s) {
+	case "help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "service", "update", "upgrade", "login", "logout", "add", "remove", "rm", "rename", "install", "uninstall", "on", "off", "pac":
 		return fmt.Errorf("reserved account name %q", s)
 	}
 	return nil

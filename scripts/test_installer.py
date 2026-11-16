@@ -19,7 +19,13 @@ with tempfile.TemporaryDirectory(prefix='subscale-installer-') as root:
     fixture.mkdir()
     archive = fixture / archive_name
     with tarfile.open(archive, 'w:gz') as tar:
-        data = b'#!/bin/sh\nprintf "subscale fixture\\n"\n'
+        data = b'''#!/bin/sh
+if [ "$#" -gt 0 ]; then
+  printf '%s\\n' "$*" >> "$INSTALLER_FIXTURE/service-calls.txt"
+  exit "${INSTALLER_SERVICE_EXIT:-0}"
+fi
+printf 'subscale fixture\\n'
+'''
         info = tarfile.TarInfo('subscale')
         info.mode = 0o755
         info.size = len(data)
@@ -46,6 +52,8 @@ shutil.copyfile(fixture / url.rsplit('/', 1)[1], output)
     env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH'],
                SUBSCALE_INSTALL_DIR=str(dest), INSTALLER_FIXTURE=str(fixture))
     env.pop('SUBSCALE_VERSION', None)
+    env.pop('SUBSCALE_AUTOSTART', None)
+    env.pop('INSTALLER_SERVICE_EXIT', None)
 
     def install(success=True):
         result = subprocess.run(['sh', str(installer)], env=env, capture_output=True, timeout=20)
@@ -69,4 +77,42 @@ shutil.copyfile(fixture / url.rsplit('/', 1)[1], output)
     install()
     assert '/releases/download/v0.1.0/' in (fixture / 'requests.txt').read_text()
     assert not list(dest.glob('.subscale.*'))
-    print('PASS: binary install, executable permissions, latest/pinned URLs, checksum rejection, atomic replacement')
+
+    # Exercise macOS startup on either CI host, without running launchctl/systemd.
+    uname = tools / 'uname'
+    uname.write_text(f'''#!/bin/sh
+case "$1" in
+  -s) printf '%s\\n' "$INSTALLER_SYSTEM" ;;
+  -m) printf '%s\\n' '{arch}' ;;
+  *) exit 1 ;;
+esac
+''')
+    uname.chmod(0o755)
+    (fixture / 'subscale').write_bytes(data)
+    go = tools / 'go'
+    go.write_text('''#!/bin/sh
+[ "$1" = build ] && [ "$3" = -o ] || exit 1
+cp "$INSTALLER_FIXTURE/subscale" "$4"
+chmod 755 "$4"
+''')
+    go.chmod(0o755)
+    calls = fixture / 'service-calls.txt'
+    for target_system, target_platform in [('Darwin', 'darwin'), ('Linux', 'linux')]:
+        target_archive = f'subscale_{target_platform}_{arch}.tar.gz'
+        (fixture / target_archive).write_bytes(archive.read_bytes())
+        target_checksum = hashlib.sha256((fixture / target_archive).read_bytes()).hexdigest()
+        manifest.write_text(f'{target_checksum}  {target_archive}\n')
+        env['INSTALLER_SYSTEM'] = target_system
+        for script in [installer, installer.with_name('install-source.sh')]:
+            for skip, fail in [(False, False), (True, False), (False, True)]:
+                calls.unlink(missing_ok=True)
+                env['SUBSCALE_AUTOSTART'] = '0' if skip else '1'
+                env['INSTALLER_SERVICE_EXIT'] = '1' if fail else '0'
+                result = subprocess.run(['sh', str(script)], env=env, capture_output=True, timeout=20)
+                assert result.returncode == 0, result.stderr.decode()
+                should_start = target_system == 'Darwin' and not skip
+                assert calls.exists() == should_start, (script, target_system, skip)
+                if should_start:
+                    assert calls.read_text() == 'service install\n'
+                assert (b'login startup could not be enabled' in result.stderr) == (should_start and fail)
+    print('PASS: binary install, checksums, atomic replacement, macOS startup, opt-out, startup failure, Linux manual startup, source install')

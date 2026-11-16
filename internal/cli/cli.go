@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -29,6 +28,9 @@ const help = `subscale — named secondary Tailscale connections
   subscale NAME add HOST [--to HOST]   Route a hostname, IP or *.domain via NAME
   subscale NAME remove HOST           Remove a routing rule (alias: rm)
   subscale NAME list                  Show this account and its rules
+  subscale NAME rename NEW_NAME       Rename an account, keeping login and rules
+  subscale list                       List authenticated accounts
+  subscale update | upgrade           Install the latest GitHub release
   subscale status                     Show all accounts and routing rules
   subscale start | stop               Start/stop the background daemon
   subscale exec COMMAND [ARG...]      Run a program with HTTP proxy variables
@@ -52,6 +54,11 @@ State: SUBSCALE_HOME or the OS user config directory / subscale.
 `
 
 func Run(args []string, version string) error {
+	if len(args) >= 2 && args[1] == "login" {
+		if e := config.Name(args[0]); e != nil {
+			return e
+		}
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		io.WriteString(os.Stdout, help)
 		return nil
@@ -63,6 +70,12 @@ func Run(args []string, version string) error {
 	dir, e := config.Dir()
 	if e != nil {
 		return e
+	}
+	if args[0] == "update" || args[0] == "upgrade" {
+		if len(args) != 1 {
+			return fmt.Errorf("usage: subscale %s", args[0])
+		}
+		return updateBinary(dir, version)
 	}
 	if args[0] == "daemon" {
 		if len(args) != 1 {
@@ -94,6 +107,9 @@ func Run(args []string, version string) error {
 			return fmt.Errorf("usage: subscale %s", args[0])
 		}
 		q.Op = "status"
+		if args[0] == "list" {
+			q.Op = "list"
+		}
 	case "exec":
 		if len(args) < 2 {
 			return errors.New("usage: subscale exec COMMAND [ARG...]")
@@ -107,7 +123,7 @@ func Run(args []string, version string) error {
 			return e
 		}
 		if len(args) < 2 {
-			return errors.New("expected NAME login|logout|add|remove|list")
+			return errors.New("expected NAME login|logout|add|remove|list|rename")
 		}
 		q.Name = args[0]
 		q.Op = args[1]
@@ -118,6 +134,14 @@ func Run(args []string, version string) error {
 			}
 			if q.Op == "list" {
 				q.Op = "status"
+			}
+		case "rename":
+			if len(args) != 3 {
+				return errors.New("usage: subscale NAME rename NEW_NAME")
+			}
+			q.NewName = args[2]
+			if e = config.Name(q.NewName); e != nil {
+				return e
 			}
 		case "add":
 			if len(args) != 3 && (len(args) != 5 || args[3] != "--to") {
@@ -161,7 +185,11 @@ func Run(args []string, version string) error {
 	if q.Op == "login" {
 		return waitLogin(dir, q.Name)
 	}
-	if q.Op == "status" {
+	if q.Op == "list" {
+		writeList(os.Stdout, out)
+	} else if q.Op == "rename" {
+		fmt.Printf("%s renamed to %s\n", q.Name, q.NewName)
+	} else if q.Op == "status" {
 		printStatus(out, q.Name)
 	} else {
 		fmt.Printf("%s: %s complete\n", q.Name, q.Op)
@@ -263,62 +291,4 @@ func openBrowser(url string) {
 	if e := cmd.Start(); e == nil {
 		go cmd.Wait()
 	}
-}
-func printStatus(out daemon.Response, only string) {
-	names := []string{}
-	for n := range out.Config.Accounts {
-		if only == "" || n == only {
-			names = append(names, n)
-		}
-	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		fmt.Println("No accounts. Add one: subscale work login")
-		return
-	}
-	for _, n := range names {
-		st := out.Status[n]
-		fmt.Printf("%s\t%s\t%s\n", n, st.State, strings.Join(st.IPs, ", "))
-		if st.Error != "" {
-			fmt.Println("  error:", st.Error)
-		}
-		for _, r := range out.Config.Routes {
-			if r.Account == n {
-				fmt.Printf("  %s", r.Host)
-				if r.Target != "" {
-					fmt.Printf(" → %s", r.Target)
-				}
-				fmt.Println()
-			}
-		}
-	}
-	fmt.Printf("Proxy: http://%s\nPAC: http://%s/proxy.pac\n", out.Proxy, out.Proxy)
-}
-func execute(args []string) error {
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	blocked := map[string]bool{}
-	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"} {
-		blocked[k] = true
-	}
-	for _, v := range os.Environ() {
-		k, _, _ := strings.Cut(v, "=")
-		if !blocked[k] {
-			cmd.Env = append(cmd.Env, v)
-		}
-	}
-	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
-		cmd.Env = append(cmd.Env, k+"=http://"+config.ProxyAddress)
-	}
-	cmd.Env = append(cmd.Env, "NO_PROXY=", "no_proxy=")
-	if e := cmd.Run(); e != nil {
-		var exit *exec.ExitError
-		if errors.As(e, &exit) {
-			os.Exit(exit.ExitCode())
-		}
-		return e
-	}
-	return nil
 }

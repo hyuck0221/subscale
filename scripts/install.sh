@@ -52,4 +52,12 @@ mv -f "$STAGED" "$DEST/subscale"
 STAGED=''
 printf '\nInstalled %s/subscale\n' "$DEST"
 case ":$PATH:" in *":$DEST:"*) ;; *) printf 'Add to your shell configuration: export PATH="%s:$PATH"\n' "$DEST";; esac
-printf '\nNext:\n  subscale work login\n  subscale work add server.example.ts.net\n  subscale service install\n'
+if [ "$PLATFORM" = darwin ] && [ "${SUBSCALE_AUTOSTART:-1}" != 0 ]; then
+  if ! "$DEST/subscale" service install; then
+    printf '\nInstalled, but login startup could not be enabled. Retry: "%s/subscale" service install\n' "$DEST" >&2
+  fi
+fi
+printf '\nNext:\n  subscale work login\n  subscale work add server.example.ts.net\n'
+if [ "$PLATFORM" = linux ]; then
+  printf '  subscale service install\n'
+fi

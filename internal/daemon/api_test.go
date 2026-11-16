@@ -20,15 +20,30 @@ type fakeNodes struct {
 	mu        sync.Mutex
 	online    map[string]bool
 	logoutErr error
+	loginErr  error
 }
 
-func (f *fakeNodes) Start(n string) error {
+func (f *fakeNodes) Start(n, storage string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.online[n] = true
 	return nil
 }
-func (f *fakeNodes) Login(_ context.Context, n string) error { return f.Start(n) }
+func (f *fakeNodes) Login(_ context.Context, n, storage string) error {
+	if e := f.Start(n, storage); e != nil {
+		return e
+	}
+	return f.loginErr
+}
+func (f *fakeNodes) Rename(old, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if value, ok := f.online[old]; ok {
+		f.online[name] = value
+		delete(f.online, old)
+	}
+	return nil
+}
 func (f *fakeNodes) Logout(_ context.Context, n string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

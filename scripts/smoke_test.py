@@ -13,12 +13,17 @@ import threading
 import time
 
 binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else "bin/subscale").resolve())
+proxy_address = os.environ.get("SUBSCALE_SMOKE_PROXY_ADDR", "127.0.0.1:18765")
+proxy_host, proxy_port = proxy_address.rsplit(":", 1)
+assert proxy_host == "127.0.0.1"
+proxy_port = int(proxy_port)
 # The production proxy address is fixed; do not interfere with an existing daemon.
 with socket.socket() as probe:
     try:
-        probe.bind(("127.0.0.1", 18765))
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        probe.bind((proxy_host, proxy_port))
     except OSError:
-        raise SystemExit("Port 18765 is occupied; stop the existing proxy before this smoke test.")
+        raise SystemExit(f"Port {proxy_port} is occupied; use an isolated test build or stop the existing proxy.")
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -53,14 +58,36 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             for output in pool.map(lambda _: run("start"), range(3)):
                 assert b"LoggedOut" in output.stdout
-        assert b"18765/proxy.pac" in run("proxy", "pac").stdout
+        assert b"No logged-in accounts" in run("list").stdout
+        for reserved in ("status", "list", "update", "upgrade", "rename", "login"):
+            result = run(reserved, "login", check=False)
+            assert result.returncode != 0 and b"reserved account name" in result.stderr
+        assert (proxy_address + "/proxy.pac").encode() in run("proxy", "pac").stdout
         run("work", "add", "https://DB.invalid:8443/path", "--to", "100.64.1.2")
         saved = json.loads(Path(directory, "config.json").read_text())
         assert saved["routes"] == [{"account": "work", "host": "db.invalid", "target": "100.64.1.2"}]
         assert b"db.invalid" in run("work", "list").stdout
         assert run("home", "add", "db.invalid", check=False).returncode != 0
         assert b"502" == run("exec", "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "http://db.invalid").stdout
-        run("work", "remove", "db.invalid")
+        # Legacy on-disk identities survive rename and a daemon restart.
+        credentials = Path(directory, "accounts", "work", "credential-fixture")
+        credentials.parent.mkdir(parents=True)
+        credentials.write_bytes(b"keep-this-identity")
+        run("work", "rename", "office")
+        saved = json.loads(Path(directory, "config.json").read_text())
+        assert saved["accounts"]["office"]["state_dir"] == "work"
+        assert saved["routes"][0]["account"] == "office"
+        assert b"keep-this-identity" == credentials.read_bytes()
+        assert run("office", "rename", "home", check=False).returncode != 0
+        assert run("office", "rename", "status", check=False).returncode != 0
+        run("stop")
+        for _ in range(50):
+            if not Path(directory, "daemon.sock").exists():
+                break
+            time.sleep(0.1)
+        assert b"office" in run("status").stdout
+        assert b"db.invalid" in run("office", "list").stdout
+        run("office", "remove", "db.invalid")
         url = f"http://127.0.0.1:{server.server_port}/"
         assert run("exec", "curl", "-fsS", url).stdout == b"subscale direct path works"
         request = f"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n".encode()
@@ -68,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
         # PAC is an origin endpoint, so fetch it directly rather than through itself.
         import urllib.request
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open("http://127.0.0.1:18765/proxy.pac", timeout=3) as response:
+        with opener.open("http://" + proxy_address + "/proxy.pac", timeout=3) as response:
             assert b"FindProxyForURL" in response.read()
         run("stop")
         for _ in range(50):
@@ -76,7 +103,7 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
                 break
             time.sleep(0.1)
         assert not Path(directory, "daemon.sock").exists()
-        print("PASS: concurrent startup, persistence, account conflicts, fail-closed routing, HTTP, TCP CONNECT, PAC, shutdown")
+        print("PASS: concurrent startup, authenticated list, rename persistence, reserved names, account conflicts, fail-closed routing, HTTP, TCP CONNECT, PAC, shutdown")
     finally:
         try:
             run("stop", check=False)

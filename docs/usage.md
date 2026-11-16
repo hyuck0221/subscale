@@ -8,6 +8,8 @@
 
 바이너리 설치와 다운로드는 [README](../README.md#설치)를 참고하세요. 소스에서 빌드하려면 Go 1.27.4 이상으로 `make install`을 실행합니다.
 
+macOS에서는 배포 바이너리 설치 스크립트와 `make install`이 자동으로 `subscale service install`을 실행합니다. 기존 설치본은 `subscale service install`을 한 번 실행하면 됩니다. 자동 실행 등록을 생략하려면 설치 스크립트를 실행하는 셸에 `SUBSCALE_AUTOSTART=0`을 설정하세요. 등록에 실패해도 바이너리 설치는 유지되며 재시도 명령을 출력합니다. Linux와 바이너리 수동 다운로드 설치는 `subscale service install`을 직접 실행하세요.
+
 `service install`은 macOS에서는 사용자 LaunchAgent, Linux에서는 systemd 사용자 서비스를 설치해 로그인 시 재연결합니다. 설치한 바이너리를 이동하면 서비스를 다시 설치해야 합니다. 로그인 전 부팅 단계의 실행은 지원하지 않습니다. 서비스 설치 없이도 명령을 실행하면 데몬이 자동으로 시작됩니다.
 
 ## 계정 등록과 사용
@@ -21,15 +23,36 @@ subscale work add 100.80.1.2
 subscale home add nas.other-tailnet.ts.net
 subscale work add '*.corp.example'
 
-subscale status
+subscale list                        # 인증된 계정만 표시
+subscale status                      # 로그아웃된 계정도 포함
 subscale work list
 subscale work remove grafana.example.ts.net  # rm도 가능
 subscale work logout
 ```
 
-계정 이름은 영문자·숫자·`_`·`-`로 1~32자이며, 첫 문자는 영문자 또는 숫자입니다. CLI 명령 이름은 예약되어 있습니다. `login` 시 브라우저에서 **그 이름에 연결할 계정**으로 로그인하세요. 인증 URL도 터미널에 출력됩니다. 서버에서 브라우저를 열지 않으려면 `SUBSCALE_NO_BROWSER=1`을 설정하세요.
+계정 이름은 영문자·숫자·`_`·`-`로 1~32자이며, 첫 문자는 영문자 또는 숫자입니다. `status`, `list`, `update`, `upgrade`, `rename` 등 CLI 명령과 하위 명령 이름은 대소문자 구분 없이 예약되어 있습니다. `login` 시 브라우저에서 **그 이름에 연결할 계정**으로 로그인하세요. 인증 URL도 터미널에 출력됩니다. 서버에서 브라우저를 열지 않으려면 `SUBSCALE_NO_BROWSER=1`을 설정하세요.
 
 인증 상태를 저장하므로 다음 실행에는 다시 로그인하지 않고 연결합니다. 다만 Tailscale 키 만료, 관리자 승인, 기기 삭제, 인증 정책 변경 등으로 재인증이 필요할 수 있습니다. 계정마다 `subscale-work` 같은 별도 기기로 등록되며 tailnet의 기기 제한과 ACL이 적용됩니다. `logout`은 해당 계정만 로그아웃하고 이름과 주소 규칙은 유지합니다. 이후 `login`으로 다시 사용할 수 있습니다.
+
+계정 이름은 인증이나 주소 규칙을 잃지 않고 변경할 수 있습니다. 기존 이름으로 다시 로그인하면 별개의 새 계정으로 등록됩니다.
+
+```sh
+subscale work rename office
+subscale office list
+```
+
+이미 존재하는 이름이나 명령어 이름으로는 변경할 수 없습니다. 저장에 실패하면 기존 이름과 연결을 유지합니다.
+
+## 업데이트
+
+```sh
+subscale update
+# 같은 명령: subscale upgrade
+```
+
+`hyuck0221/subscale`의 최신 GitHub 릴리스에서 현재 OS·CPU에 맞는 파일을 내려받습니다. SHA-256 체크섬과 실행 파일의 버전을 확인한 뒤 현재 실행 파일을 교체합니다. 이미 최신이면 교체하지 않으며, 다운로드·검증 실패 시 기존 파일을 유지합니다. 설치 디렉터리에 쓰기 권한이 필요합니다.
+
+실행 중인 데몬은 저장한 계정과 규칙을 유지한 채 재시작합니다. 이때 기존 프록시·SSH 연결은 끊길 수 있습니다. GitHub에 릴리스가 게시되어 있어야 업데이트할 수 있습니다.
 
 ## 브라우저에서 주소만 입력해 접속
 
@@ -99,7 +122,7 @@ subscale exec curl http://work-db.internal:3000
 
 ```text
 config.json           계정 사용 여부와 주소 규칙 (0600, 원자적 교체)
-accounts/<name>/      Tailscale 인증과 노드 상태
+accounts/<id>/        이름 변경에도 유지되는 Tailscale 인증과 노드 상태
 proxy-backup.json      macOS의 이전 자동 프록시 설정
 daemon.sock           로컬 관리 API 소켓 (0600)
 daemon.lock           데몬 중복 실행 방지 잠금
@@ -127,7 +150,7 @@ make smoke   # 임시 설정으로 빌드된 CLI 실행 검증 (Python 3, curl �
 
 테스트는 주소 정규화·우선순위·계정 충돌, 인증 상태 저장 흐름(대역 구현), 저장 실패 시 규칙 유지, HTTP 프록시 전달, 인증 헤더 제거, HTTPS CONNECT, CONNECT 헤더 뒤에 미리 도착한 데이터, 보조 연결 실패 시 직접 연결 방지를 검증합니다. 실제 여러 계정의 OAuth 인증과 Tailscale 네트워크 간 통신은 본인 계정으로 별도 확인해야 합니다. macOS 네트워크 설정 및 로그인 서비스 설치는 호스트 설정을 변경하므로 자동 테스트에서 실행하지 않습니다.
 
-구조는 `cmd/subscale`(진입점), `internal/cli`(명령·설치), `internal/daemon`(관리 API·프로세스), `internal/config`(저장·규칙), `internal/router`(HTTP·CONNECT·PAC), `internal/tailnet`(tsnet 계정 노드)로 나눕니다.
+구조는 `cmd/subscale`(진입점), `internal/cli`(명령·설치), `internal/daemon`(관리 API·프로세스), `internal/config`(저장·규칙), `internal/router`(HTTP·CONNECT·PAC), `internal/tailnet`(tsnet 계정 노드), `internal/update`(릴리스 검증·업데이트)로 나눕니다.
 
 Tailscale 참고: [tsnet](https://tailscale.com/docs/features/tsnet), [userspace networking](https://tailscale.com/docs/concepts/userspace-networking).
 

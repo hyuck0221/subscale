@@ -12,6 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/hyuck0221/subscale/main/scripts/ins
 
 기본 설치 경로는 `~/.local/bin`입니다. PATH에 없다면 셸 설정 파일에 추가하세요.
 
+macOS에서는 설치 스크립트가 로그인 시 자동 실행을 함께 등록합니다. 재부팅 후 로그인하면 저장한 계정과 주소 규칙으로 자동 재연결합니다.
+
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -28,7 +30,7 @@ subscale work add 100.80.1.2
 subscale home login                      # 다른 계정도 함께 등록
 subscale home add '*.home.example'
 
-subscale status
+subscale list                            # 로그인된 계정 목록
 ```
 
 브라우저에서 자동으로 연결하려면 macOS에서 한 번 설정합니다. `Wi-Fi`는 사용 중인 네트워크 서비스 이름으로 바꾸세요.
@@ -50,6 +52,9 @@ ssh -o 'ProxyCommand=subscale connect %h %p' user@nas.example.ts.net
 
 | 명령 | 설명 |
 | --- | --- |
+| `subscale list` | 로그인된 모든 계정 확인 |
+| `subscale update` / `subscale upgrade` | 최신 버전으로 업데이트 |
+| `subscale work rename office` | 인증·주소 규칙을 유지하며 이름 변경 |
 | `subscale work login` | 계정 등록·로그인 |
 | `subscale work logout` | 해당 계정 로그아웃, 주소 규칙 유지 |
 | `subscale work add 주소` | 도메인·IP·와일드카드 등록 |
@@ -57,6 +62,8 @@ ssh -o 'ProxyCommand=subscale connect %h %p' user@nas.example.ts.net
 | `subscale work list` | 계정 상태와 주소 규칙 확인 |
 | `subscale service install` | 로그인 시 자동 실행 |
 | `subscale proxy off Wi-Fi` | 이전 자동 프록시 설정 복구 |
+
+`status`, `list`, `update` 등 명령어 이름은 계정 이름으로 사용할 수 없습니다. 로그아웃된 계정까지 보려면 `subscale status`를 사용하세요.
 
 ## 지원 범위
 

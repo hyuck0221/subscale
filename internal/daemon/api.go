@@ -2,8 +2,11 @@ package daemon
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -15,18 +18,20 @@ import (
 )
 
 type Nodes interface {
-	Start(string) error
-	Login(context.Context, string) error
+	Start(string, string) error
+	Login(context.Context, string, string) error
+	Rename(string, string) error
 	Logout(context.Context, string) error
 	Status(context.Context, string) tailnet.Status
 	Dial(context.Context, string, string) (net.Conn, error)
 	Close()
 }
 type Request struct {
-	Op     string `json:"op"`
-	Name   string `json:"name,omitempty"`
-	Host   string `json:"host,omitempty"`
-	Target string `json:"target,omitempty"`
+	Op      string `json:"op"`
+	Name    string `json:"name,omitempty"`
+	NewName string `json:"new_name,omitempty"`
+	Host    string `json:"host,omitempty"`
+	Target  string `json:"target,omitempty"`
 }
 type Response struct {
 	Config config.Config             `json:"config"`
@@ -46,6 +51,15 @@ func (a *API) Routes() []config.Route {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]config.Route(nil), a.Config.Routes...)
+}
+func (a *API) Dial(ctx context.Context, name, address string) (net.Conn, error) {
+	a.mu.Lock()
+	account, ok := a.Config.Accounts[name]
+	a.mu.Unlock()
+	if !ok || !account.Enabled {
+		return nil, fmt.Errorf("account %q is logged out; run subscale %s login", name, name)
+	}
+	return a.Nodes.Dial(ctx, name, address)
 }
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -72,12 +86,15 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	out := Response{Config: a.Config, Proxy: config.ProxyAddress, Status: map[string]tailnet.Status{}}
 	a.mu.Unlock()
-	if q.Op == "status" || q.Op == "login" {
+	if q.Op == "status" || q.Op == "login" || q.Op == "list" {
 		for n := range out.Config.Accounts {
 			if q.Name == "" || n == q.Name {
 				out.Status[n] = a.Nodes.Status(ctx, n)
 			}
 		}
+	}
+	if q.Op == "list" {
+		out = authenticatedAccounts(out)
 	}
 	json.NewEncoder(w).Encode(out)
 	if q.Op == "stop" && a.Stop != nil {
@@ -88,7 +105,7 @@ func (a *API) apply(ctx context.Context, q Request) error {
 	switch q.Op {
 	case "ping", "stop":
 		return nil
-	case "status":
+	case "status", "list":
 		if q.Name != "" {
 			if _, ok := a.Config.Accounts[q.Name]; !ok {
 				return fmt.Errorf("unknown account %q", q.Name)
@@ -110,10 +127,23 @@ func (a *API) apply(ctx context.Context, q Request) error {
 	}
 	switch q.Op {
 	case "login":
-		if e := a.Nodes.Login(ctx, q.Name); e != nil {
+		account := c.Accounts[q.Name]
+		if !exists {
+			account.StateDir = "acct-" + rand.Text()[:20]
+			// Persist the identity before starting OAuth, so a failed attempt or
+			// daemon restart retries the same credentials rather than a new node.
+			c.Accounts[q.Name] = account
+			if e := config.Save(a.Dir, c); e != nil {
+				return e
+			}
+			a.Config = c
+			c.Accounts = maps.Clone(c.Accounts)
+		}
+		if e := a.Nodes.Login(ctx, q.Name, account.Storage(q.Name)); e != nil {
 			return e
 		}
-		c.Accounts[q.Name] = config.Account{Enabled: true}
+		account.Enabled = true
+		c.Accounts[q.Name] = account
 	case "logout":
 		if !c.Accounts[q.Name].Enabled {
 			return nil
@@ -121,7 +151,36 @@ func (a *API) apply(ctx context.Context, q Request) error {
 		if e := a.Nodes.Logout(ctx, q.Name); e != nil {
 			return e
 		}
-		c.Accounts[q.Name] = config.Account{Enabled: false}
+		account := c.Accounts[q.Name]
+		account.Enabled = false
+		c.Accounts[q.Name] = account
+	case "rename":
+		if e := config.Name(q.NewName); e != nil {
+			return e
+		}
+		if q.NewName == q.Name {
+			return nil
+		}
+		if _, ok := c.Accounts[q.NewName]; ok {
+			return fmt.Errorf("account %q already exists", q.NewName)
+		}
+		account := c.Accounts[q.Name]
+		account.StateDir = account.Storage(q.Name)
+		delete(c.Accounts, q.Name)
+		c.Accounts[q.NewName] = account
+		for i := range c.Routes {
+			if c.Routes[i].Account == q.Name {
+				c.Routes[i].Account = q.NewName
+			}
+		}
+		if e := a.Nodes.Rename(q.Name, q.NewName); e != nil {
+			return e
+		}
+		if e := config.Save(a.Dir, c); e != nil {
+			return errors.Join(e, a.Nodes.Rename(q.NewName, q.Name))
+		}
+		a.Config = c
+		return nil
 	case "add", "remove":
 		h, e := config.Host(q.Host, true)
 		if e != nil {
