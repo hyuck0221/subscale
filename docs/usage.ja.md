@@ -130,13 +130,15 @@ SSH の `ProxyCommand` に `connect` を指定すると、登録したアドレ�
 
 画面共有、SSH、データベースなどの TCP サービスに使用できます。転送は選択したアカウントの Tailscale 接続を通じて TCP 通信を中継するため、転送自体に SSH サーバー・ユーザー名・SSH 認証は必要ありません。接続先のサービス自体の認証は引き続き必要です。
 
+以下の例では、`[NAME]` を登録済みのアカウント名、`[HOST]` を接続先デバイスのアドレスに置き換えてください。
+
 ```sh
-subscale mds forward add 100.89.207.112:5900
-subscale mds forward add 100.89.207.112:5432 --local 15432
-subscale mds forward add 'db.example.ts.net:5432'
-subscale mds forward add '[fd7a:115c:a1e0::1]:22'
-subscale mds forward list
-subscale mds forward remove 100.89.207.112:5900
+subscale [NAME] forward add [HOST]:5900
+subscale [NAME] forward add [HOST]:5432 --local 15432
+subscale [NAME] forward add 'db.example.ts.net:5432'
+subscale [NAME] forward add '[fd7a:115c:a1e0::1]:22'
+subscale [NAME] forward list
+subscale [NAME] forward remove [HOST]:5900
 ```
 
 `add` が出力する `127.0.0.1:ポート` にクライアントを接続してください。画面共有では Finder の「サーバへ接続」に `vnc://127.0.0.1:ポート` を入力し、データベースではホスト `127.0.0.1` と表示されたポートを指定します。転送ポートには、このパソコンの `127.0.0.1` からのみ接続できます。ブラウザーの PAC 設定や個別のホストルーティングルールは不要です。接続先のドメインは選択したアカウントのネットワークで名前解決されます。既存の `add HOST --to HOST` の別名ルールは、転送先には適用されません。

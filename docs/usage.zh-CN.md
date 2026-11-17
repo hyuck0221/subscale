@@ -130,13 +130,15 @@ Host nas.other-tailnet.ts.net
 
 可用于屏幕共享、SSH、数据库等 TCP 服务。转发通过所选账号的 Tailscale 连接中继 TCP 流量，因此转发本身不需要 SSH 服务器、用户名或 SSH 认证。目标服务自身的认证要求仍然有效。
 
+在以下示例中，请将 `[NAME]` 替换为已注册的账号名称，将 `[HOST]` 替换为要访问的设备地址。
+
 ```sh
-subscale mds forward add 100.89.207.112:5900
-subscale mds forward add 100.89.207.112:5432 --local 15432
-subscale mds forward add 'db.example.ts.net:5432'
-subscale mds forward add '[fd7a:115c:a1e0::1]:22'
-subscale mds forward list
-subscale mds forward remove 100.89.207.112:5900
+subscale [NAME] forward add [HOST]:5900
+subscale [NAME] forward add [HOST]:5432 --local 15432
+subscale [NAME] forward add 'db.example.ts.net:5432'
+subscale [NAME] forward add '[fd7a:115c:a1e0::1]:22'
+subscale [NAME] forward list
+subscale [NAME] forward remove [HOST]:5900
 ```
 
 将客户端连接到 `add` 输出的 `127.0.0.1:端口`。屏幕共享可在 Finder 的“连接服务器”中使用 `vnc://127.0.0.1:端口`；数据库则使用主机 `127.0.0.1` 和对应端口。转发端口只能通过本机的 `127.0.0.1` 访问。无需配置浏览器 PAC，也无需另行添加主机路由规则。目标域名通过所选账号的网络解析。现有的 `add HOST --to HOST` 别名规则不会应用于转发目标。

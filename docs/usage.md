@@ -130,13 +130,15 @@ Host nas.other-tailnet.ts.net
 
 화면 공유, SSH, DB 등 TCP 서비스에 사용할 수 있습니다. SSH 터널링이 아니라 선택한 계정의 Tailscale 연결을 통한 TCP 중계이므로 SSH 서버·사용자명·SSH 인증이 필요하지 않습니다. 접속한 서비스 자체의 인증은 그대로 적용됩니다.
 
+아래 예시의 `[NAME]`은 등록한 계정 이름으로, `[HOST]`는 접속할 기기의 주소로 바꿔 입력하세요.
+
 ```sh
-subscale mds forward add 100.89.207.112:5900
-subscale mds forward add 100.89.207.112:5432 --local 15432
-subscale mds forward add 'db.example.ts.net:5432'
-subscale mds forward add '[fd7a:115c:a1e0::1]:22'
-subscale mds forward list
-subscale mds forward remove 100.89.207.112:5900
+subscale [NAME] forward add [HOST]:5900
+subscale [NAME] forward add [HOST]:5432 --local 15432
+subscale [NAME] forward add 'db.example.ts.net:5432'
+subscale [NAME] forward add '[fd7a:115c:a1e0::1]:22'
+subscale [NAME] forward list
+subscale [NAME] forward remove [HOST]:5900
 ```
 
 `add`가 출력한 `127.0.0.1:포트`로 클라이언트를 연결하세요. 화면 공유라면 Finder의 서버 연결에 `vnc://127.0.0.1:포트`, DB라면 호스트 `127.0.0.1`과 해당 포트를 사용합니다. 포워딩 포트는 이 컴퓨터의 `127.0.0.1`에서만 접속할 수 있습니다. 브라우저 PAC 설정이나 별도의 호스트 라우팅 규칙 등록은 필요하지 않으며, 대상 도메인은 선택한 계정의 네트워크에서 해석합니다. 기존 `add HOST --to HOST` 별칭 규칙은 포워딩 대상에 적용되지 않습니다.

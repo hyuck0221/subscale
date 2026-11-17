@@ -130,13 +130,15 @@ With `connect` as SSH's `ProxyCommand`, registered addresses use the correspondi
 
 Use port forwarding for TCP services such as screen sharing, SSH, or databases. Connections are relayed through the selected account's Tailscale connection, so the forwarding itself does not require an SSH server, username, or SSH authentication. The destination service's own authentication still applies.
 
+In the examples below, replace `[NAME]` with your registered account name and `[HOST]` with the address of the device you want to reach.
+
 ```sh
-subscale mds forward add 100.89.207.112:5900
-subscale mds forward add 100.89.207.112:5432 --local 15432
-subscale mds forward add 'db.example.ts.net:5432'
-subscale mds forward add '[fd7a:115c:a1e0::1]:22'
-subscale mds forward list
-subscale mds forward remove 100.89.207.112:5900
+subscale [NAME] forward add [HOST]:5900
+subscale [NAME] forward add [HOST]:5432 --local 15432
+subscale [NAME] forward add 'db.example.ts.net:5432'
+subscale [NAME] forward add '[fd7a:115c:a1e0::1]:22'
+subscale [NAME] forward list
+subscale [NAME] forward remove [HOST]:5900
 ```
 
 Connect your client to the `127.0.0.1:port` printed by `add`. For screen sharing, use `vnc://127.0.0.1:port` in Finder's Connect to Server dialog. For a database, use host `127.0.0.1` and the displayed port. Forwarded ports are accessible only through `127.0.0.1` on this computer. No browser PAC setting or separate host routing rule is needed. Destination domains are resolved through the selected account's network. Existing `add HOST --to HOST` alias rules do not apply to forwarding destinations.
