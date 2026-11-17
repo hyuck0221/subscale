@@ -19,6 +19,7 @@ jobs:
       - run: make check
       - run: sh -n scripts/install.sh scripts/install-source.sh scripts/release.sh
       - run: python3 scripts/test_installer.py
+      - run: python3 -m unittest discover -s scripts -p 'test_update_tap.py'
       - run: go test -race -timeout 2m ./...
       - run: make build
       - run: python3 scripts/smoke_test.py

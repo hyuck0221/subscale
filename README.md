@@ -1,8 +1,18 @@
 # subscale
 
+[한국어](README.md) | [English](README.en.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+
 기존 Tailscale 연결을 유지하면서 지정한 주소를 다른 Tailscale 계정으로 연결합니다.
 
 ## 설치
+
+### Homebrew
+
+```sh
+brew install hyuck0221/tap/subscale
+```
+
+### 설치 스크립트
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/hyuck0221/subscale/main/scripts/install.sh | sh

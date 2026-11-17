@@ -16,6 +16,7 @@ jobs:
       - run: make check
       - run: sh -n scripts/install.sh scripts/install-source.sh scripts/release.sh
       - run: python3 scripts/test_installer.py
+      - run: python3 -m unittest discover -s scripts -p 'test_update_tap.py'
       - run: go test -race -timeout 2m ./...
       - name: Build release archives
         env:
@@ -41,3 +42,59 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: gh release create "$RELEASE_TAG" dist/* --verify-tag --title "subscale $RELEASE_TAG" --generate-notes
+  update-tap:
+    needs: publish
+    # Prereleases/build metadata must not replace the stable Homebrew release.
+    if: ${{ !contains(github.ref_name, '-') && !contains(github.ref_name, '+') }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: homebrew-tap-subscale
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check tap credentials
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo '::error::Set HOMEBREW_TAP_TOKEN with Contents read/write access to hyuck0221/homebrew-tap.'
+            exit 1
+          fi
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: hyuck0221/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+      - name: Download published checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release download "$RELEASE_TAG" --pattern checksums.txt --dir dist
+      - name: Update formula
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 scripts/update_tap.py \
+            --formula homebrew-tap/Formula/subscale.rb \
+            --checksums dist/checksums.txt \
+            --tag "$RELEASE_TAG"
+          ruby -c homebrew-tap/Formula/subscale.rb
+          git -C homebrew-tap diff --check
+      - name: Commit and push tap update
+        working-directory: homebrew-tap
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if git diff --quiet -- Formula/subscale.rb; then
+            echo 'No tap update needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Formula/subscale.rb
+          git commit -m "subscale $RELEASE_TAG"
+          git push origin HEAD
