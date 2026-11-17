@@ -24,6 +24,8 @@ type Nodes interface {
 	Logout(context.Context, string) error
 	Status(context.Context, string) tailnet.Status
 	Dial(context.Context, string, string) (net.Conn, error)
+	Devices(context.Context, string) ([]tailnet.Device, error)
+	Resolve(context.Context, string, string) (tailnet.Resolution, error)
 	Close()
 }
 type Request struct {
@@ -40,6 +42,8 @@ type Response struct {
 	Error         string                    `json:"error,omitempty"`
 	Proxy         string                    `json:"proxy"`
 	ForwardStatus map[int]string            `json:"forward_status,omitempty"`
+	Devices       []tailnet.Device          `json:"devices,omitempty"`
+	Check         *CheckResult              `json:"check,omitempty"`
 }
 type API struct {
 	mu            sync.Mutex
@@ -79,9 +83,18 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(Response{Error: e.Error()})
 		return
 	}
-	a.mu.Lock()
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+	if q.Op == "check" || q.Op == "devices" {
+		out, err := a.inspect(ctx, q)
+		if err != nil {
+			w.WriteHeader(400)
+			out.Error = err.Error()
+		}
+		json.NewEncoder(w).Encode(out)
+		return
+	}
+	a.mu.Lock()
 	if e := a.apply(ctx, q); e != nil {
 		a.mu.Unlock()
 		w.WriteHeader(400)

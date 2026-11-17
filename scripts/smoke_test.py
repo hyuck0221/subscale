@@ -59,6 +59,16 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
             for output in pool.map(lambda _: run("start"), range(3)):
                 assert b"LoggedOut" in output.stdout
         assert b"No logged-in accounts" in run("list").stdout
+        # Diagnostics are read-only and must not attempt a logged-out account.
+        before_diagnostics = Path(directory, "config.json").read_bytes()
+        result = run("work", "check", "db.invalid:5432", check=False)
+        assert result.returncode != 0
+        assert b"LoggedOut" in result.stdout and b"skipped" in result.stdout
+        assert b"subscale work login" in result.stdout
+        result = run("work", "devices", check=False)
+        assert result.returncode != 0 and b"logged out" in result.stderr
+        assert run("work", "check", "invalid", check=False).returncode != 0
+        assert Path(directory, "config.json").read_bytes() == before_diagnostics
         for reserved in ("status", "list", "update", "upgrade", "rename", "login"):
             result = run(reserved, "login", check=False)
             assert result.returncode != 0 and b"reserved account name" in result.stderr

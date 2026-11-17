@@ -145,7 +145,7 @@ func Name(s string) error {
 		return fmt.Errorf("account name must be 1-32 ASCII letters, digits, _ or -, starting with a letter or digit")
 	}
 	switch strings.ToLower(s) {
-	case "help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "forward", "service", "update", "upgrade", "login", "logout", "add", "remove", "rm", "rename", "install", "uninstall", "on", "off", "pac":
+	case "help", "version", "daemon", "start", "stop", "status", "list", "proxy", "exec", "connect", "forward", "devices", "check", "service", "update", "upgrade", "login", "logout", "add", "remove", "rm", "rename", "install", "uninstall", "on", "off", "pac":
 		return fmt.Errorf("reserved account name %q", s)
 	}
 	return nil

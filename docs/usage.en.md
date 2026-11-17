@@ -57,6 +57,19 @@ subscale office list
 
 You cannot rename an account to an existing account name or a command name. If saving fails, the original name and connection are retained.
 
+## Devices and connection checks
+
+```sh
+subscale [NAME] devices
+subscale [NAME] check [HOST]:[PORT]
+```
+
+`devices` lists the DNS name, IPs, online status and OS of devices visible to the account. The current subscale node is marked `(self)`. Being online does not guarantee service reachability.
+
+`check` inspects account state, matching rules, name resolution and TCP connectivity. It applies `--to` rules belonging to the selected account and only displays rules from other accounts. No routing rule is required. To check a forwarding destination itself, enter the actual target rather than an alias.
+
+The check opens and immediately closes a TCP connection to the first resolved IP. DNS and TCP each have a five-second timeout; failure exits with code 1. `Network` indicates whether the resolved address uses a Tailscale route. TCP success does not test SSH, screen-sharing or database authentication. Configuration is not changed.
+
 ## Updating
 
 ```sh

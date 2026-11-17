@@ -33,6 +33,8 @@ subscale [NAME] list
 | --- | --- |
 | `subscale list` | 列出已登录的账号 |
 | `subscale status` | 查看所有账号的状态 |
+| `subscale [NAME] devices` | 列出账号可见的设备 |
+| `subscale [NAME] check [HOST]:[PORT]` | 诊断 DNS 和 TCP 连接 |
 | `subscale [NAME] rename [NEW_NAME]` | 修改账号名称 |
 | `subscale [NAME] remove [HOST]` | 删除地址规则 |
 | `subscale [NAME] logout` | 退出登录 |

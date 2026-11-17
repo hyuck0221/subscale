@@ -33,6 +33,8 @@ subscale [NAME] list
 | --- | --- |
 | `subscale list` | 로그인된 계정 목록 |
 | `subscale status` | 전체 계정 상태 |
+| `subscale [NAME] devices` | 계정의 기기 목록 |
+| `subscale [NAME] check [HOST]:[PORT]` | DNS·TCP 연결 진단 |
 | `subscale [NAME] rename [NEW_NAME]` | 계정 이름 변경 |
 | `subscale [NAME] remove [HOST]` | 주소 규칙 삭제 |
 | `subscale [NAME] logout` | 로그아웃 |

@@ -29,6 +29,8 @@ const help = `subscale — named secondary Tailscale connections
   subscale NAME remove HOST           Remove a routing rule (alias: rm)
   subscale NAME list                  Show this account and its rules
   subscale NAME rename NEW_NAME       Rename an account, keeping login and rules
+  subscale NAME devices               List visible tailnet devices
+  subscale NAME check HOST:PORT       Diagnose account, DNS and TCP connectivity
   subscale NAME forward add HOST:PORT [--local PORT]
                                       Save a TCP forward (automatic local port)
   subscale NAME forward list          Show saved forwards and local addresses
@@ -129,7 +131,7 @@ func Run(args []string, version string) error {
 			return e
 		}
 		if len(args) < 2 {
-			return errors.New("expected NAME login|logout|add|remove|list|rename|forward")
+			return errors.New("expected NAME login|logout|add|remove|list|rename|forward|devices|check")
 		}
 		q.Name = args[0]
 		q.Op = args[1]
@@ -139,7 +141,15 @@ func Run(args []string, version string) error {
 			if e != nil {
 				return e
 			}
-		case "login", "logout", "list", "status":
+		case "check":
+			if len(args) != 3 {
+				return errors.New("usage: subscale NAME check HOST:PORT")
+			}
+			q.Target, e = config.Endpoint(args[2])
+			if e != nil {
+				return e
+			}
+		case "login", "logout", "list", "status", "devices":
 			if len(args) != 2 {
 				return errors.New("unexpected arguments")
 			}
@@ -196,7 +206,11 @@ func Run(args []string, version string) error {
 	if q.Op == "login" {
 		return waitLogin(dir, q.Name)
 	}
-	if q.Op == "forward-add" || q.Op == "forward-list" {
+	if q.Op == "devices" {
+		writeDevices(os.Stdout, out.Devices)
+	} else if q.Op == "check" {
+		return writeCheck(os.Stdout, out.Check)
+	} else if q.Op == "forward-add" || q.Op == "forward-list" {
 		writeForwards(os.Stdout, out, q.Name, q.Target)
 	} else if q.Op == "forward-remove" {
 		fmt.Printf("%s: removed forward %s\n", q.Name, q.Target)

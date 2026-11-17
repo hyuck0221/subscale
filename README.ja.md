@@ -33,6 +33,8 @@ subscale [NAME] list
 | --- | --- |
 | `subscale list` | ログイン済みアカウントの一覧 |
 | `subscale status` | すべてのアカウントの状態を表示 |
+| `subscale [NAME] devices` | アカウントから見えるデバイスの一覧 |
+| `subscale [NAME] check [HOST]:[PORT]` | DNS・TCP 接続の診断 |
 | `subscale [NAME] rename [NEW_NAME]` | アカウント名を変更 |
 | `subscale [NAME] remove [HOST]` | アドレスルールを削除 |
 | `subscale [NAME] logout` | ログアウト |

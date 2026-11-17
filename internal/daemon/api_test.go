@@ -66,6 +66,12 @@ func (f *fakeNodes) Dial(context.Context, string, string) (net.Conn, error) {
 	return nil, errors.New("unused")
 }
 func (f *fakeNodes) Close() {}
+func (f *fakeNodes) Devices(context.Context, string) ([]tailnet.Device, error) {
+	return nil, errors.New("unused")
+}
+func (f *fakeNodes) Resolve(context.Context, string, string) (tailnet.Resolution, error) {
+	return tailnet.Resolution{}, errors.New("unused")
+}
 func newAPI(t *testing.T) *API {
 	t.Helper()
 	return &API{Dir: t.TempDir(), Config: config.Config{Accounts: map[string]config.Account{}}, Nodes: &fakeNodes{online: map[string]bool{}}}

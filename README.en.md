@@ -33,6 +33,8 @@ subscale [NAME] list
 | --- | --- |
 | `subscale list` | List signed-in accounts |
 | `subscale status` | Show the status of all accounts |
+| `subscale [NAME] devices` | List devices visible to an account |
+| `subscale [NAME] check [HOST]:[PORT]` | Diagnose DNS and TCP connectivity |
 | `subscale [NAME] rename [NEW_NAME]` | Rename an account |
 | `subscale [NAME] remove [HOST]` | Remove an address rule |
 | `subscale [NAME] logout` | Sign out |
