@@ -15,7 +15,10 @@ func TestListOnlyAuthenticatedAccounts(t *testing.T) {
 	mustRequest(t, a, Request{Op: "login", Name: "work"})
 	mustRequest(t, a, Request{Op: "login", Name: "home"})
 	mustRequest(t, a, Request{Op: "add", Name: "home", Host: "nas.example"})
-	mustRequest(t, a, Request{Op: "logout", Name: "home"})
+	a.Config.Accounts["home"] = config.Account{}
+	if err := a.Nodes.Disconnect("home"); err != nil {
+		t.Fatal(err)
+	}
 	out := mustRequest(t, a, Request{Op: "list"})
 	if len(out.Config.Accounts) != 1 || out.Status["work"].State != "Running" || len(out.Config.Routes) != 0 {
 		t.Fatalf("list: %+v", out)
@@ -52,15 +55,15 @@ func TestRenameKeepsStateAndRoutes(t *testing.T) {
 	if a.Config.Accounts["work"].StateDir == storage {
 		t.Fatal("reused name inherited the renamed account's credentials")
 	}
-	mustRequest(t, a, Request{Op: "logout", Name: "office"})
+	mustRequest(t, a, Request{Op: "clear", Name: "office"})
 	if a.Config.Accounts["office"].StateDir != storage {
-		t.Fatal("logout discarded identity")
+		t.Fatal("clear discarded identity")
 	}
 }
 func TestRenameLegacyStorageAndFailureRollback(t *testing.T) {
 	a := newAPI(t)
 	a.Config.Accounts["work"] = config.Account{Enabled: true}
-	a.Nodes.Start("work", "work")
+	a.Nodes.Start("work", "work", false)
 	mustRequest(t, a, Request{Op: "add", Name: "work", Host: "db.example"})
 	mustRequest(t, a, Request{Op: "rename", Name: "work", NewName: "office"})
 	if a.Config.Accounts["office"].StateDir != "work" {
@@ -104,11 +107,11 @@ func TestFailedLoginRetainsIdentityForRetry(t *testing.T) {
 		t.Fatal("login unexpectedly succeeded")
 	}
 	first := a.Config.Accounts["work"]
-	if first.StateDir == "" || first.Enabled {
+	if first.StateDir == "" || first.Enabled || !first.Ephemeral {
 		t.Fatal("pending identity not saved")
 	}
 	loaded, e := config.Load(a.Dir)
-	if e != nil || loaded.Accounts["work"].StateDir != first.StateDir {
+	if e != nil || loaded.Accounts["work"].StateDir != first.StateDir || !loaded.Accounts["work"].Ephemeral {
 		t.Fatal("failed login lost persistent identity")
 	}
 	if _, e := a.Dial(context.Background(), "work", "db.example:443"); e == nil {
@@ -126,8 +129,8 @@ type failSaveAfterLogin struct {
 	dir string
 }
 
-func (n failSaveAfterLogin) Login(ctx context.Context, name, storage string) error {
-	if e := n.Nodes.Login(ctx, name, storage); e != nil {
+func (n failSaveAfterLogin) Login(ctx context.Context, name, storage string, ephemeral bool) error {
+	if e := n.Nodes.Login(ctx, name, storage, ephemeral); e != nil {
 		return e
 	}
 	if e := os.Remove(filepath.Join(n.dir, "config.json")); e != nil {

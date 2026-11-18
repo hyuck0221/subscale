@@ -37,7 +37,8 @@ subscale [NAME] list
 | `subscale [NAME] check [HOST]:[PORT]` | 诊断 DNS 和 TCP 连接 |
 | `subscale [NAME] rename [NEW_NAME]` | 修改账号名称 |
 | `subscale [NAME] remove [HOST]` | 删除地址规则 |
-| `subscale [NAME] logout` | 退出登录 |
+| `subscale [NAME] clear` | 删除该账号的所有地址规则和 TCP 转发 |
+| `subscale [NAME] logout` | 从 Machines 移除设备并删除本地账号 |
 | `subscale update` | 更新到最新版本 |
 
 ## 浏览器连接

@@ -37,7 +37,8 @@ subscale [NAME] list
 | `subscale [NAME] check [HOST]:[PORT]` | Diagnose DNS and TCP connectivity |
 | `subscale [NAME] rename [NEW_NAME]` | Rename an account |
 | `subscale [NAME] remove [HOST]` | Remove an address rule |
-| `subscale [NAME] logout` | Sign out |
+| `subscale [NAME] clear` | Clear all routing rules and TCP forwards for the account |
+| `subscale [NAME] logout` | Remove the device from Machines and delete the local account |
 | `subscale update` | Update to the latest version |
 
 ## Browser connections

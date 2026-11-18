@@ -17,8 +17,14 @@ import (
 const ProxyAddress = "127.0.0.1:18765"
 
 type Account struct {
-	Enabled  bool   `json:"enabled"`
-	StateDir string `json:"state_dir,omitempty"`
+	Enabled   bool           `json:"enabled"`
+	Ephemeral bool           `json:"ephemeral,omitempty"`
+	StateDir  string         `json:"state_dir,omitempty"`
+	Removal   *DeviceRemoval `json:"removal,omitempty"`
+}
+
+type DeviceRemoval struct {
+	MachineRemoved bool `json:"machine_removed,omitempty"`
 }
 
 // Storage remains stable when the CLI name changes. Empty supports older configs.
@@ -69,6 +75,9 @@ func Load(dir string) (Config, error) {
 	for n, account := range c.Accounts {
 		if e := Name(n); e != nil {
 			return c, e
+		}
+		if account.Enabled && account.Removal != nil {
+			return c, fmt.Errorf("account %q is enabled while removal is pending", n)
 		}
 		id := account.Storage(n)
 		if !validName.MatchString(id) || storage[id] {

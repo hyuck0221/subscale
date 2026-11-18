@@ -81,8 +81,8 @@ func Run(dir string) error {
 			break
 		}
 		api.mu.Lock()
-		if api.Config.Accounts[n].Enabled {
-			if startErr := nodes.Start(n, api.Config.Accounts[n].Storage(n)); startErr != nil {
+		if account := api.Config.Accounts[n]; account.Enabled {
+			if startErr := nodes.Start(n, account.Storage(n), account.Ephemeral); startErr != nil {
 				log.Printf("start %s: %v", n, startErr)
 			}
 		}

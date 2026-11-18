@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,10 +19,11 @@ import (
 )
 
 type Nodes interface {
-	Start(string, string) error
-	Login(context.Context, string, string) error
+	Start(string, string, bool) error
+	Login(context.Context, string, string, bool) error
 	Rename(string, string) error
-	Logout(context.Context, string) error
+	LogoutEphemeral(context.Context, string, string) error
+	Disconnect(string) error
 	Status(context.Context, string) tailnet.Status
 	Dial(context.Context, string, string) (net.Conn, error)
 	Devices(context.Context, string) ([]tailnet.Device, error)
@@ -29,12 +31,13 @@ type Nodes interface {
 	Close()
 }
 type Request struct {
-	Op        string `json:"op"`
-	Name      string `json:"name,omitempty"`
-	NewName   string `json:"new_name,omitempty"`
-	Host      string `json:"host,omitempty"`
-	Target    string `json:"target,omitempty"`
-	LocalPort int    `json:"local_port,omitempty"`
+	Op             string `json:"op"`
+	Name           string `json:"name,omitempty"`
+	NewName        string `json:"new_name,omitempty"`
+	Host           string `json:"host,omitempty"`
+	Target         string `json:"target,omitempty"`
+	LocalPort      int    `json:"local_port,omitempty"`
+	MachineRemoved bool   `json:"machine_removed,omitempty"`
 }
 type Response struct {
 	Config        config.Config             `json:"config"`
@@ -138,9 +141,18 @@ func (a *API) apply(ctx context.Context, q Request) error {
 	for n, v := range a.Config.Accounts {
 		c.Accounts[n] = v
 	}
-	_, exists := c.Accounts[q.Name]
+	account, exists := c.Accounts[q.Name]
+	if q.Op == "purge" && !exists {
+		return nil
+	}
 	if q.Op != "login" && !exists {
 		return fmt.Errorf("unknown account %q; run subscale %s login", q.Name, q.Name)
+	}
+	if account.Removal != nil {
+		switch q.Op {
+		case "login", "rename", "add", "forward-add":
+			return fmt.Errorf("removal pending for %q; retry subscale %s logout", q.Name, q.Name)
+		}
 	}
 	if q.Op == "forward-add" || q.Op == "forward-remove" {
 		return a.applyForward(q, c)
@@ -150,6 +162,7 @@ func (a *API) apply(ctx context.Context, q Request) error {
 		account := c.Accounts[q.Name]
 		if !exists {
 			account.StateDir = "acct-" + rand.Text()[:20]
+			account.Ephemeral = true
 			// Persist the identity before starting OAuth, so a failed attempt or
 			// daemon restart retries the same credentials rather than a new node.
 			c.Accounts[q.Name] = account
@@ -159,21 +172,15 @@ func (a *API) apply(ctx context.Context, q Request) error {
 			a.Config = c
 			c.Accounts = maps.Clone(c.Accounts)
 		}
-		if e := a.Nodes.Login(ctx, q.Name, account.Storage(q.Name)); e != nil {
+		if e := a.Nodes.Login(ctx, q.Name, account.Storage(q.Name), account.Ephemeral); e != nil {
 			return e
 		}
 		account.Enabled = true
 		c.Accounts[q.Name] = account
-	case "logout":
-		if !c.Accounts[q.Name].Enabled {
-			return nil
-		}
-		if e := a.Nodes.Logout(ctx, q.Name); e != nil {
-			return e
-		}
-		account := c.Accounts[q.Name]
-		account.Enabled = false
-		c.Accounts[q.Name] = account
+	case "clear":
+		return a.clearAccountSettings(q.Name, c)
+	case "purge":
+		return a.purgeAccount(ctx, q, c)
 	case "rename":
 		if e := config.Name(q.NewName); e != nil {
 			return e
@@ -249,6 +256,33 @@ func (a *API) apply(ctx context.Context, q Request) error {
 	a.Config = c
 	return nil
 }
+
+// Called with a.mu held and a copy of the configuration.
+func (a *API) clearAccountSettings(name string, c config.Config) error {
+	c.Routes = slices.DeleteFunc(c.Routes, func(r config.Route) bool {
+		return r.Account == name
+	})
+	var ports []int
+	c.Forwards = slices.DeleteFunc(c.Forwards, func(f config.Forward) bool {
+		if f.Account != name {
+			return false
+		}
+		ports = append(ports, f.LocalPort)
+		return true
+	})
+	if len(c.Routes) == len(a.Config.Routes) && len(ports) == 0 && c.Accounts[name] == a.Config.Accounts[name] {
+		return nil
+	}
+	if err := config.Save(a.Dir, c); err != nil {
+		return fmt.Errorf("clear settings: %w", err)
+	}
+	a.Config = c
+	for _, port := range ports {
+		a.closeForward(port)
+	}
+	return nil
+}
+
 func Client(dir string) *http.Client {
 	return &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, "daemon.sock"))

@@ -112,9 +112,25 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
         assert b"office" in run("status").stdout
         assert b"db.invalid" in run("office", "list").stdout
         assert f"127.0.0.1:{forward_port}".encode() in run("office", "forward", "list").stdout
-        run("office", "forward", "remove", forward_target)
+        assert b"Cancelled" in run("office", "clear", data=b"n\n").stderr
+        assert b"db.invalid" in run("office", "list").stdout
+        assert f"127.0.0.1:{forward_port}".encode() in run("office", "forward", "list").stdout
+        run("office", "clear", data=b"y\n")
         assert b"No TCP forwards" in run("office", "forward", "list").stdout
-        run("office", "remove", "db.invalid")
+        assert b"db.invalid" not in run("office", "list").stdout
+        assert b"keep-this-identity" == credentials.read_bytes()
+        run("office", "add", "db.invalid")
+        run("office", "forward", "add", forward_target)
+        legacy_logout = run("office", "logout", data=b"y\n", check=False)
+        assert legacy_logout.returncode != 0 and b"--machine-removed" in legacy_logout.stderr
+        assert credentials.exists() and b"db.invalid" in run("office", "list").stdout
+        assert b"Cancelled" in run("office", "logout", "--machine-removed", data=b"\n").stderr
+        assert credentials.exists() and b"db.invalid" in run("office", "list").stdout
+        run("office", "logout", "--machine-removed", data=b"y\n")
+        saved = json.loads(Path(directory, "config.json").read_text())
+        assert not saved.get("forwards") and not saved.get("routes")
+        assert b"office" not in run("status").stdout
+        assert not credentials.parent.exists()
         url = f"http://127.0.0.1:{server.server_port}/"
         assert run("exec", "curl", "-fsS", url).stdout == b"subscale direct path works"
         request = f"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n".encode()
@@ -130,7 +146,7 @@ with tempfile.TemporaryDirectory(prefix="subscale-smoke-", dir="/tmp") as direct
                 break
             time.sleep(0.1)
         assert not Path(directory, "daemon.sock").exists()
-        print("PASS: concurrent startup, authenticated list, rename persistence, saved TCP forwards, reserved names, account conflicts, fail-closed routing, HTTP, TCP CONNECT, PAC, shutdown")
+        print("PASS: concurrent startup, authenticated list, rename persistence, saved TCP forwards, clear and logout, reserved names, account conflicts, fail-closed routing, HTTP, TCP CONNECT, PAC, shutdown")
     finally:
         try:
             run("stop", check=False)

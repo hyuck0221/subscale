@@ -146,7 +146,9 @@ func TestInspectDisabledAndInvalidAccounts(t *testing.T) {
 			t.Fatalf("accepted %+v", q)
 		}
 	}
-	mustRequest(t, a, Request{Op: "logout", Name: "work"})
+	account := a.Config.Accounts["work"]
+	account.Enabled = false
+	a.Config.Accounts["work"] = account
 	r := mustRequest(t, a, Request{Op: "check", Name: "work", Target: "host:22"}).Check
 	if r.Success || r.State != "LoggedOut" || r.DNS != "skipped" || r.TCP != "skipped" {
 		t.Fatalf("%+v", r)

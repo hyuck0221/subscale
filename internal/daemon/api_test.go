@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -19,18 +20,18 @@ import (
 type fakeNodes struct {
 	mu        sync.Mutex
 	online    map[string]bool
-	logoutErr error
 	loginErr  error
+	logoutErr error
 }
 
-func (f *fakeNodes) Start(n, storage string) error {
+func (f *fakeNodes) Start(n, storage string, _ bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.online[n] = true
 	return nil
 }
-func (f *fakeNodes) Login(_ context.Context, n, storage string) error {
-	if e := f.Start(n, storage); e != nil {
+func (f *fakeNodes) Login(_ context.Context, n, storage string, ephemeral bool) error {
+	if e := f.Start(n, storage, ephemeral); e != nil {
 		return e
 	}
 	return f.loginErr
@@ -44,23 +45,25 @@ func (f *fakeNodes) Rename(old, name string) error {
 	}
 	return nil
 }
-func (f *fakeNodes) Logout(_ context.Context, n string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (f *fakeNodes) LogoutEphemeral(_ context.Context, n, _ string) error {
 	if f.logoutErr != nil {
 		return f.logoutErr
 	}
+	return f.Disconnect(n)
+}
+func (f *fakeNodes) Disconnect(n string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.online[n] = false
 	return nil
 }
 func (f *fakeNodes) Status(_ context.Context, n string) tailnet.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	s := "LoggedOut"
 	if f.online[n] {
-		s = "Running"
+		return tailnet.Status{State: "Running"}
 	}
-	return tailnet.Status{State: s}
+	return tailnet.Status{State: "LoggedOut"}
 }
 func (f *fakeNodes) Dial(context.Context, string, string) (net.Conn, error) {
 	return nil, errors.New("unused")
@@ -74,7 +77,10 @@ func (f *fakeNodes) Resolve(context.Context, string, string) (tailnet.Resolution
 }
 func newAPI(t *testing.T) *API {
 	t.Helper()
-	return &API{Dir: t.TempDir(), Config: config.Config{Accounts: map[string]config.Account{}}, Nodes: &fakeNodes{online: map[string]bool{}}}
+	return &API{
+		Dir: t.TempDir(), Config: config.Config{Accounts: map[string]config.Account{}},
+		Nodes: &fakeNodes{online: map[string]bool{}},
+	}
 }
 func request(t *testing.T, a *API, q Request) (Response, int) {
 	t.Helper()
@@ -110,19 +116,33 @@ func TestAccountAndRouteLifecycle(t *testing.T) {
 	if out, code := request(t, a, Request{Op: "add", Name: "home", Host: "db.example"}); code != 400 || out.Error == "" {
 		t.Fatal("conflicting account silently stole route")
 	}
-	out = mustRequest(t, a, Request{Op: "logout", Name: "work"})
-	if out.Config.Accounts["work"].Enabled || len(out.Config.Routes) != 1 {
-		t.Fatal("logout lost rules or kept account enabled")
+	storage := filepath.Join(a.Dir, "accounts", a.Config.Accounts["work"].StateDir)
+	if err := os.MkdirAll(storage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storage, "credentials"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	out = mustRequest(t, a, Request{Op: "purge", Name: "work"})
+	if _, exists := out.Config.Accounts["work"]; exists || len(out.Config.Routes) != 0 {
+		t.Fatal("logout kept rules or the account")
+	}
+	if _, err := os.Stat(storage); !os.IsNotExist(err) {
+		t.Fatalf("credential directory survived logout: %v", err)
 	}
 	loaded, e := config.Load(a.Dir)
-	if e != nil || loaded.Accounts["work"].Enabled {
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, exists := loaded.Accounts["work"]; exists || len(loaded.Routes) != 0 {
 		t.Fatal("logout not persisted")
 	}
 	out = mustRequest(t, a, Request{Op: "status"})
-	if out.Status["home"].State != "Running" || out.Status["work"].State != "LoggedOut" {
+	if out.Status["home"].State != "Running" || len(out.Status) != 1 {
 		t.Fatal("logout affected another account")
 	}
 	mustRequest(t, a, Request{Op: "login", Name: "work"})
+	mustRequest(t, a, Request{Op: "add", Name: "work", Host: "db.example"})
 	mustRequest(t, a, Request{Op: "remove", Name: "work", Host: "db.example"})
 	if len(a.Routes()) != 0 {
 		t.Fatal("route not removed")
@@ -145,18 +165,60 @@ func TestFailedSaveKeepsLiveRoutes(t *testing.T) {
 	if len(a.Routes()) != 1 {
 		t.Fatal("failed save changed live routes")
 	}
+	if _, code := request(t, a, Request{Op: "purge", Name: "work"}); code != 400 {
+		t.Fatal("logout continued after clear failed")
+	}
+	if len(a.Routes()) != 1 || a.Nodes.Status(context.Background(), "work").State != "Running" {
+		t.Fatal("failed clear changed live routes or logged out the node")
+	}
 }
-func TestLogoutFailureIsReported(t *testing.T) {
+func TestPurgeRetriesAfterRemoteFailure(t *testing.T) {
 	a := newAPI(t)
 	mustRequest(t, a, Request{Op: "login", Name: "work"})
-	a.Nodes.(*fakeNodes).logoutErr = errors.New("offline")
-	if _, code := request(t, a, Request{Op: "logout", Name: "work"}); code != 400 {
-		t.Fatal("logout failure ignored")
+	mustRequest(t, a, Request{Op: "add", Name: "work", Host: "db.example"})
+	nodes := a.Nodes.(*fakeNodes)
+	nodes.logoutErr = errors.New("offline")
+	q := Request{Op: "purge", Name: "work"}
+	if _, code := request(t, a, q); code != 400 {
+		t.Fatal("remote failure ignored")
 	}
-	if !a.Config.Accounts["work"].Enabled {
-		t.Fatal("claimed successful logout")
+	loaded, err := config.Load(a.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := loaded.Accounts["work"]
+	if pending.Enabled || pending.Removal == nil || pending.Removal.MachineRemoved || len(loaded.Routes) != 0 {
+		t.Fatalf("unexpected removal state: %+v", loaded)
+	}
+	a.Config = loaded
+	if _, code := request(t, a, Request{Op: "login", Name: "work"}); code != 400 {
+		t.Fatal("login continued during pending removal")
+	}
+	nodes.logoutErr = nil
+	out := mustRequest(t, a, q)
+	if _, exists := out.Config.Accounts["work"]; exists {
+		t.Fatal("retry kept deleted account")
 	}
 }
+func TestPurgeLegacyAccountRequiresMachinesRemoval(t *testing.T) {
+	a := newAPI(t)
+	a.Config.Accounts["legacy"] = config.Account{}
+	mustRequest(t, a, Request{Op: "add", Name: "legacy", Host: "db.example"})
+
+	q := Request{Op: "purge", Name: "legacy"}
+	if out, code := request(t, a, q); code != 400 || !strings.Contains(out.Error, "--machine-removed") {
+		t.Fatalf("expected manual Machines removal instructions: %d %s", code, out.Error)
+	}
+	if len(a.Routes()) != 1 || a.Config.Accounts["legacy"].Removal != nil {
+		t.Fatal("legacy account changed before Machines removal")
+	}
+	q.MachineRemoved = true
+	out := mustRequest(t, a, q)
+	if len(out.Config.Accounts) != 0 || len(out.Config.Routes) != 0 {
+		t.Fatal("local legacy account survived removal")
+	}
+}
+
 func TestConcurrentReadsAndEdits(t *testing.T) {
 	a := newAPI(t)
 	mustRequest(t, a, Request{Op: "login", Name: "work"})

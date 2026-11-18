@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -24,7 +25,11 @@ import (
 const help = `subscale — named secondary Tailscale connections
 
   subscale NAME login                 Register a name and sign in with Tailscale
-  subscale NAME logout                Sign out (keep the name and routing rules)
+  subscale NAME clear                 Confirm and clear local rules and TCP forwards
+  subscale NAME logout [--machine-removed]
+                                      Confirm and delete the account and its Tailscale device
+                                      For older accounts, remove the device in Machines first,
+                                      then use --machine-removed
   subscale NAME add HOST [--to HOST]   Route a hostname, IP or *.domain via NAME
   subscale NAME remove HOST           Remove a routing rule (alias: rm)
   subscale NAME list                  Show this account and its rules
@@ -131,7 +136,7 @@ func Run(args []string, version string) error {
 			return e
 		}
 		if len(args) < 2 {
-			return errors.New("expected NAME login|logout|add|remove|list|rename|forward|devices|check")
+			return errors.New("expected NAME login|clear|logout|add|remove|list|rename|forward|devices|check")
 		}
 		q.Name = args[0]
 		q.Op = args[1]
@@ -149,7 +154,14 @@ func Run(args []string, version string) error {
 			if e != nil {
 				return e
 			}
-		case "login", "logout", "list", "status", "devices":
+		case "logout":
+			if len(args) == 3 && args[2] == "--machine-removed" {
+				q.MachineRemoved = true
+			} else if len(args) != 2 {
+				return errors.New("usage: subscale NAME logout [--machine-removed]")
+			}
+			q.Op = "purge"
+		case "login", "clear", "list", "status", "devices":
 			if len(args) != 2 {
 				return errors.New("unexpected arguments")
 			}
@@ -190,6 +202,24 @@ func Run(args []string, version string) error {
 			return fmt.Errorf("unknown account command %q", q.Op)
 		}
 	}
+	if q.Op == "clear" || q.Op == "purge" {
+		switch {
+		case q.Op == "clear":
+			fmt.Fprintf(os.Stderr, "Delete all local routing rules and TCP forwards for %q? [y/N] ", q.Name)
+		case q.MachineRemoved:
+			fmt.Fprintf(os.Stderr, "Confirm that the Tailscale device for %q is already removed and permanently delete the local account? [y/N] ", q.Name)
+		default:
+			fmt.Fprintf(os.Stderr, "Remove the Tailscale device for %q from Machines and permanently delete the local account and its settings? [y/N] ", q.Name)
+		}
+		answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if !strings.EqualFold(strings.TrimSpace(answer), "y") {
+			fmt.Fprintln(os.Stderr, "Cancelled.")
+			return nil
+		}
+	}
 	if e = ensure(dir); e != nil {
 		return e
 	}
@@ -218,6 +248,8 @@ func Run(args []string, version string) error {
 		writeList(os.Stdout, out)
 	} else if q.Op == "rename" {
 		fmt.Printf("%s renamed to %s\n", q.Name, q.NewName)
+	} else if q.Op == "purge" {
+		fmt.Printf("%s: account removed\n", q.Name)
 	} else if q.Op == "status" {
 		printStatus(out, q.Name)
 	} else {

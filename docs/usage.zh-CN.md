@@ -41,12 +41,17 @@ subscale list                        # 仅显示已认证的账号
 subscale status                      # 包括已退出登录的账号
 subscale work list
 subscale work remove grafana.example.ts.net  # 也可以使用 rm
+subscale work clear
 subscale work logout
 ```
 
 账号名称由 1～32 个英文字母、数字、`_` 或 `-` 组成，首字符必须为英文字母或数字。`status`、`list`、`update`、`upgrade`、`rename` 等命令及子命令名称为保留名称，不区分大小写。执行 `login` 时，请在浏览器中登录**要与该名称关联的 Tailscale 账号**。认证 URL 也会显示在终端中。如果不希望在服务器上打开浏览器，请设置 `SUBSCALE_NO_BROWSER=1`。
 
-登录状态会保存，后续运行时无需再次登录即可连接。但 Tailscale 密钥过期、需要管理员批准、设备被删除或认证策略变更时，可能仍需重新认证。每个账号会注册为一个独立设备，例如 `subscale-work`，并受 tailnet 的设备数量限制和 ACL 规则约束。`logout` 仅退出该账号，保留名称和地址规则。之后可以通过 `login` 再次使用。
+每个账号会注册为一个独立设备，例如 `subscale-work`，并受 tailnet 的设备数量限制和 ACL 规则约束。新账号会注册为临时设备。守护进程停止或设备离线一段时间后，Tailscale 可能会移除该设备。设备被移除后，请运行 `login` 重新认证。
+
+`clear` 删除该账号的所有地址规则和 TCP 转发，并保留登录状态。已退出登录的账号也可以使用此命令。`logout` 会先清除这些本地设置，再从 Tailscale Machines 移除设备，最后删除本地账号名称和认证信息。两条命令都需要在提示时输入 `y` 才会执行。
+
+临时设备的 `logout` 使用 Tailscale 的设备退出功能。如果远程退出失败，可以重试同一命令。对于使用旧版注册为普通设备的账号，请先在 Machines 中移除设备，再运行 `subscale work logout --machine-removed` 完成本地删除。
 
 修改账号名称不会丢失登录状态或地址规则。再次使用旧名称登录时，会注册为一个独立的新账号。
 
@@ -147,7 +152,7 @@ subscale [NAME] forward remove [HOST]:5900
 
 守护进程运行期间，注册会立即生效；重启后会恢复相同端口。如需在电脑重启后自动恢复，请注册登录时自动启动的服务。如果端口已被占用，subscale 不会擅自更换端口，而会在 `forward list` 和 `status` 中显示错误。解决冲突后，可使用相同的 `forward add` 命令重试。即使显示 `listening`，远程设备或服务未运行时仍无法连接。
 
-退出登录后会拒绝新连接，但保留转发条目。修改账号名称时，转发条目也会迁移到新名称。`remove` 会删除转发条目并终止正在进行的连接。不支持 UDP。
+`clear` 和 `logout` 会删除该账号的所有 TCP 转发并终止正在进行的连接。修改账号名称时，转发条目也会迁移到新名称。`remove` 会删除转发条目并终止正在进行的连接。不支持 UDP。
 
 ## 地址规则
 

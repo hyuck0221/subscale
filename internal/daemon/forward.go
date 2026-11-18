@@ -93,7 +93,7 @@ func closeForwardWrite(c net.Conn) {
 }
 
 // Called with a.mu held. The dial callback resolves the current account on each
-// connection, allowing rename/logout to take effect without replacing listeners.
+// connection, allowing rename to take effect without replacing listeners.
 func (a *API) listenForward(port int) (*tcpForward, int, error) {
 	listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 	if err != nil {
@@ -146,11 +146,7 @@ func (a *API) applyForward(q Request, c config.Config) error {
 			return err
 		}
 		a.Config = c
-		if f := a.forwards[port]; f != nil {
-			f.close()
-			delete(a.forwards, port)
-		}
-		delete(a.forwardErrors, port)
+		a.closeForward(port)
 		return nil
 	}
 	port := q.LocalPort
@@ -215,6 +211,15 @@ func (a *API) restoreForwards() {
 		}
 		a.forwards[saved.LocalPort] = f
 	}
+}
+
+// Called with a.mu held.
+func (a *API) closeForward(port int) {
+	if f := a.forwards[port]; f != nil {
+		f.close()
+		delete(a.forwards, port)
+	}
+	delete(a.forwardErrors, port)
 }
 
 func (a *API) closeForwards() {

@@ -98,23 +98,18 @@ func TestForwardLifecycleAndHalfClose(t *testing.T) {
 	if got := <-nodes.calls; got != "office/db.example:5432" {
 		t.Fatal(got)
 	}
-	mustRequest(t, a, Request{Op: "logout", Name: "office"})
-	c, err := net.Dial("tcp", f.LocalAddress())
-	if err != nil {
-		t.Fatal(err)
-	}
-	c.SetDeadline(time.Now().Add(time.Second))
-	data, err := io.ReadAll(c)
-	c.Close()
-	if err != nil || len(data) != 0 {
-		t.Fatalf("logged out forward not closed: %q %v", data, err)
-	}
-	select {
-	case call := <-nodes.calls:
-		t.Fatalf("logged out connection dialed: %s", call)
-	default:
+	mustRequest(t, a, Request{Op: "purge", Name: "office"})
+	if c, err := net.DialTimeout("tcp", f.LocalAddress(), time.Second); err == nil {
+		c.Close()
+		t.Fatal("logged out listener remains open")
 	}
 	mustRequest(t, a, Request{Op: "login", Name: "office"})
+	out = mustRequest(t, a, Request{Op: "forward-list", Name: "office"})
+	if len(out.Config.Forwards) != 0 {
+		t.Fatal("login restored a forward removed by logout")
+	}
+	q.Name = "office"
+	f = mustRequest(t, a, q).Config.Forwards[0]
 	forwardExchange(t, f)
 	<-nodes.calls
 	mustRequest(t, a, Request{Op: "forward-remove", Name: "office", Target: f.Target})
@@ -122,6 +117,42 @@ func TestForwardLifecycleAndHalfClose(t *testing.T) {
 		c.Close()
 		t.Fatal("removed listener remains open")
 	}
+}
+
+func TestClearAccountSettings(t *testing.T) {
+	a, nodes := forwardAPI(t)
+	mustRequest(t, a, Request{Op: "login", Name: "home"})
+	mustRequest(t, a, Request{Op: "add", Name: "work", Host: "work.example"})
+	mustRequest(t, a, Request{Op: "add", Name: "home", Host: "home.example"})
+	work := mustRequest(t, a, Request{Op: "forward-add", Name: "work", Target: "db:5432"}).Config.Forwards[0]
+	home := mustRequest(t, a, Request{Op: "forward-add", Name: "home", Target: "db:5432"}).Config.Forwards[1]
+	conn, err := net.DialTimeout("tcp", work.LocalAddress(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	select {
+	case <-nodes.calls:
+	case <-time.After(time.Second):
+		t.Fatal("forward did not dial")
+	}
+
+	account := a.Config.Accounts["work"]
+	mustRequest(t, a, Request{Op: "clear", Name: "work"})
+	mustRequest(t, a, Request{Op: "clear", Name: "work"})
+	if a.Config.Accounts["work"] != account || a.Nodes.Status(context.Background(), "work").State != "Running" {
+		t.Fatal("clear changed account identity or disconnected it")
+	}
+	loaded, err := config.Load(a.Dir)
+	if err != nil || len(loaded.Routes) != 1 || loaded.Routes[0].Account != "home" ||
+		len(loaded.Forwards) != 1 || loaded.Forwards[0] != home {
+		t.Fatalf("saved settings after clear: %+v, %v", loaded, err)
+	}
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := conn.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("active forwarding connection stayed open: %v", err)
+	}
+	forwardExchange(t, home)
 }
 
 func TestForwardRestoreConflictAndRetry(t *testing.T) {

@@ -37,7 +37,8 @@ subscale [NAME] list
 | `subscale [NAME] check [HOST]:[PORT]` | DNS・TCP 接続の診断 |
 | `subscale [NAME] rename [NEW_NAME]` | アカウント名を変更 |
 | `subscale [NAME] remove [HOST]` | アドレスルールを削除 |
-| `subscale [NAME] logout` | ログアウト |
+| `subscale [NAME] clear` | アカウントのアドレスルールと TCP 転送をすべて削除 |
+| `subscale [NAME] logout` | Machines からデバイスを削除し、ローカルアカウントも削除 |
 | `subscale update` | 最新バージョンに更新 |
 
 ## ブラウザーでの接続

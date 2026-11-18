@@ -25,7 +25,7 @@ type Manager struct {
 }
 
 func New(dir string) *Manager { return &Manager{dir: dir, nodes: map[string]*tsnet.Server{}} }
-func (m *Manager) Start(name, storage string) error {
+func (m *Manager) Start(name, storage string, ephemeral bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.nodes[name] != nil {
@@ -35,7 +35,11 @@ func (m *Manager) Start(name, storage string) error {
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
-	s := &tsnet.Server{Dir: dir, Hostname: "subscale-" + name, Logf: func(string, ...any) {}, UserLogf: func(f string, a ...any) { log.Printf("[%s] "+f, append([]any{name}, a...)...) }}
+	s := &tsnet.Server{
+		Dir: dir, Hostname: "subscale-" + name, Ephemeral: ephemeral,
+		Logf:     func(string, ...any) {},
+		UserLogf: func(f string, a ...any) { log.Printf("[%s] "+f, append([]any{name}, a...)...) },
+	}
 	if e := s.Start(); e != nil {
 		s.Close()
 		return e
@@ -52,8 +56,8 @@ func (m *Manager) node(name string) (*tsnet.Server, error) {
 	}
 	return s, nil
 }
-func (m *Manager) Login(ctx context.Context, name, storage string) error {
-	if e := m.Start(name, storage); e != nil {
+func (m *Manager) Login(ctx context.Context, name, storage string, ephemeral bool) error {
+	if e := m.Start(name, storage, ephemeral); e != nil {
 		return e
 	}
 	s, e := m.node(name)
@@ -109,21 +113,35 @@ func (m *Manager) Status(ctx context.Context, name string) Status {
 	}
 	return out
 }
-func (m *Manager) Logout(ctx context.Context, name string) error {
-	s, e := m.node(name)
-	if e != nil {
+
+func (m *Manager) LogoutEphemeral(ctx context.Context, name, storage string) error {
+	// A previous attempt may have been interrupted after the daemon persisted
+	// that removal was pending. Reopen its saved profile to retry logout.
+	if err := m.Start(name, storage, true); err != nil {
+		return err
+	}
+	s, err := m.node(name)
+	if err != nil {
+		return err
+	}
+	if !s.Ephemeral {
+		return fmt.Errorf("account %q is registered as a regular Tailscale device", name)
+	}
+	lc, err := s.LocalClient()
+	if err != nil {
+		return err
+	}
+	return lc.Logout(ctx)
+}
+
+func (m *Manager) Disconnect(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.nodes[name]
+	if s == nil {
 		return nil
 	}
-	lc, e := s.LocalClient()
-	if e != nil {
-		return e
-	}
-	if e = lc.Logout(ctx); e != nil {
-		return e
-	}
-	m.mu.Lock()
 	delete(m.nodes, name)
-	m.mu.Unlock()
 	return s.Close()
 }
 func (m *Manager) Dial(ctx context.Context, name, address string) (net.Conn, error) {

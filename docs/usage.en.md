@@ -41,12 +41,17 @@ subscale list                        # Authenticated accounts only
 subscale status                      # Includes signed-out accounts
 subscale work list
 subscale work remove grafana.example.ts.net  # rm also works
+subscale work clear
 subscale work logout
 ```
 
 Account names must contain 1–32 ASCII letters, digits, `_`, or `-`, starting with a letter or digit. Command and subcommand names such as `status`, `list`, `update`, `upgrade`, and `rename` are reserved, regardless of case. During `login`, sign in through your browser with **the Tailscale account you want to associate with that name**. The authentication URL is also printed in the terminal. To avoid opening a browser on a server, set `SUBSCALE_NO_BROWSER=1`.
 
-Sign-in state is saved, so subsequent runs reconnect without another login. Reauthentication may still be required if a Tailscale key expires, administrator approval is needed, a device is removed, or authentication policies change. Each account is registered as a separate device, such as `subscale-work`, and is subject to the tailnet's device limits and ACLs. `logout` signs out only that account, keeping its name and address rules. Use `login` to connect it again.
+Each account is registered as a separate device, such as `subscale-work`, and is subject to the tailnet’s device limits and ACLs. New accounts register as ephemeral devices. Tailscale can remove the device when the daemon stops or after time offline. Run `login` again to reconnect if the device was removed.
+
+`clear` deletes all address rules and TCP forwards for the account and preserves its sign-in state. It also works for accounts that are already signed out. `logout` first clears those local settings, then removes the device from Tailscale Machines and deletes the local account name and credentials. Both commands require entering `y` at the prompt.
+
+For ephemeral devices, `logout` uses Tailscale’s device logout. Retry the same command if remote logout fails. For an account registered as a regular device by an older version, remove the device in Machines, then run `subscale work logout --machine-removed` to finish local removal.
 
 You can rename an account without losing its sign-in state or address rules. Signing in again under the old name registers a separate new account.
 
@@ -147,7 +152,7 @@ If you omit `--local`, an available port is assigned automatically and saved. Re
 
 Changes take effect immediately while the daemon is running, and the same ports are restored after a restart. To restore them automatically after reboot, register the automatic startup service. If a port is already in use, subscale reports an error in `forward list` and `status` instead of silently choosing another port. Resolve the conflict and retry the same `forward add` command. A `listening` status does not guarantee that the remote device or service is available.
 
-Logging out rejects new connections but keeps forwarding entries. Renaming an account also moves its forwarding entries to the new name. `remove` deletes the forwarding entry and closes ongoing connections. UDP is not supported.
+`clear` and `logout` delete all TCP forwards for the account and close their active connections. Renaming an account also moves its forwarding entries to the new name. `remove` deletes the forwarding entry and closes ongoing connections. UDP is not supported.
 
 ## Address rules
 
